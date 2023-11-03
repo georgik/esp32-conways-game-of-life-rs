@@ -3,28 +3,55 @@
 
 use esp_backtrace as _;
 use esp_println::println;
-use hal::{clock::ClockControl, peripherals::Peripherals, prelude::*, Delay,
-    IO,
+use hal::{
+    clock::ClockControl,
+    peripherals::Peripherals,
+    prelude::*,
     spi::{master::Spi, SpiMode},
-    Rng,
+    Delay, Rng, IO,
 };
 
 use display_interface_spi::SPIInterfaceNoCS;
 use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    pixelcolor::Rgb565,
+    prelude::*,
     prelude::{DrawTarget, Point, RgbColor},
+    primitives::{PrimitiveStyle, Rectangle},
     text::Text,
     Drawable,
-    pixelcolor::Rgb565,
-    primitives::{PrimitiveStyle, Rectangle},
-    prelude::*,
 };
 
 // Define grid size
 const WIDTH: usize = 64;
 const HEIGHT: usize = 48;
 
-const RESET_AFTER_GENERATIONS: usize = 1500;
+const RESET_AFTER_GENERATIONS: usize = 500;
+
+use core::fmt::Write;
+
+use heapless::String;
+
+fn write_generation<D: DrawTarget<Color = Rgb565>>(
+    display: &mut D,
+    generation: usize,
+) -> Result<(), D::Error> {
+    // Create a String with a fixed capacity of 20 bytes
+    let mut num_str = String::<20>::new();
+    // Write the generation number into the string
+    // unwrap is safe here since we know the number is at most 20 characters
+    write!(num_str, "{}", generation).unwrap();
+    // Create the text drawable with the generation number
+    Text::new(
+        num_str.as_str(),
+        Point::new(8, 13),
+        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+    )
+    // Draw the text to the display
+    .draw(display)?;
+
+    Ok(())
+}
 
 fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
     for row in grid.iter_mut() {
@@ -39,23 +66,22 @@ fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
     }
 }
 
+// Apply the Game of Life rules:
+// 1. Any live cell with fewer than two live neighbors dies, as if by underpopulation.
+// 2. Any live cell with two or three live neighbors lives on to the next generation.
+// 3. Any live cell with more than three live neighbors dies, as if by overpopulation.
+// 4. Any dead cell with exactly three live neighbors becomes a live cell, as if by reproduction.
 fn update_game_of_life(grid: &mut [[bool; WIDTH]; HEIGHT]) {
     let mut new_grid = [[false; WIDTH]; HEIGHT];
 
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
-            let alive_neighbors = count_alive_neighbors(x, y, &grid);
+            let alive_neighbors = count_alive_neighbors(x, y, grid);
 
-            // Apply the Game of Life rules:
-            // 1. Any live cell with fewer than two live neighbors dies, as if by underpopulation.
-            // 2. Any live cell with two or three live neighbors lives on to the next generation.
-            // 3. Any live cell with more than three live neighbors dies, as if by overpopulation.
-            // 4. Any dead cell with exactly three live neighbors becomes a live cell, as if by reproduction.
-            new_grid[y][x] = match (grid[y][x], alive_neighbors) {
-                (true, 2) | (true, 3) => true,
-                (false, 3) => true,
-                _ => false,
-            };
+            new_grid[y][x] = matches!(
+                (grid[y][x], alive_neighbors),
+                (true, 2) | (true, 3) | (false, 3)
+            );
         }
     }
 
@@ -85,7 +111,6 @@ fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; WIDTH]; HEIGHT]) -> 
 
     count
 }
-
 
 fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
@@ -144,9 +169,10 @@ fn main() -> ! {
         .with_display_size(320, 240)
         .with_orientation(mipidsi::Orientation::PortraitInverted(false))
         .with_color_order(mipidsi::ColorOrder::Bgr)
-        .init(&mut delay, Some(reset)) {
+        .init(&mut delay, Some(reset))
+    {
         Ok(display) => display,
-        Err(e) => {
+        Err(_e) => {
             // Handle the error and possibly exit the application
             panic!("Display initialization failed");
         }
@@ -184,6 +210,8 @@ fn main() -> ! {
             randomize_grid(&mut rng, &mut grid);
             generation_count = 0; // Reset the generation counter
         }
+
+        write_generation(&mut display, generation_count).unwrap();
 
         // Add a delay to control the simulation speed
         delay.delay_ms(100u32);
