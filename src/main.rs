@@ -14,7 +14,77 @@ use embedded_graphics::{
     prelude::{DrawTarget, Point, RgbColor},
     text::Text,
     Drawable,
+    pixelcolor::Rgb565,
+    primitives::{PrimitiveStyle, Rectangle},
+    prelude::*,
 };
+
+// Define grid size
+const WIDTH: usize = 64;
+const HEIGHT: usize = 48;
+
+fn update_game_of_life(grid: &mut [[bool; WIDTH]; HEIGHT]) {
+    let mut new_grid = [[false; WIDTH]; HEIGHT];
+
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            let alive_neighbors = count_alive_neighbors(x, y, &grid);
+
+            // Apply the Game of Life rules:
+            // 1. Any live cell with fewer than two live neighbors dies, as if by underpopulation.
+            // 2. Any live cell with two or three live neighbors lives on to the next generation.
+            // 3. Any live cell with more than three live neighbors dies, as if by overpopulation.
+            // 4. Any dead cell with exactly three live neighbors becomes a live cell, as if by reproduction.
+            new_grid[y][x] = match (grid[y][x], alive_neighbors) {
+                (true, 2) | (true, 3) => true,
+                (false, 3) => true,
+                _ => false,
+            };
+        }
+    }
+
+    // Copy the new state back into the original grid
+    *grid = new_grid;
+}
+
+fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; WIDTH]; HEIGHT]) -> u8 {
+    let mut count = 0;
+
+    for i in 0..3 {
+        for j in 0..3 {
+            if i == 1 && j == 1 {
+                continue; // Skip the current cell itself
+            }
+
+            // Calculate the neighbor's coordinates with wrapping
+            let neighbor_x = (x + i + WIDTH - 1) % WIDTH;
+            let neighbor_y = (y + j + HEIGHT - 1) % HEIGHT;
+
+            // Increase count if the neighbor is alive
+            if grid[neighbor_y][neighbor_x] {
+                count += 1;
+            }
+        }
+    }
+
+    count
+}
+
+
+fn draw_grid<D: DrawTarget<Color = Rgb565>>(
+    display: &mut D,
+    grid: &[[bool; WIDTH]; HEIGHT],
+) -> Result<(), D::Error> {
+    for (y, row) in grid.iter().enumerate() {
+        for (x, &cell) in row.iter().enumerate() {
+            let color = if cell { Rgb565::WHITE } else { Rgb565::BLACK };
+            Rectangle::new(Point::new(x as i32 * 5, y as i32 * 5), Size::new(5, 5))
+                .into_styled(PrimitiveStyle::with_fill(color))
+                .draw(display)?;
+        }
+    }
+    Ok(())
+}
 
 #[entry]
 fn main() -> ! {
@@ -74,9 +144,25 @@ fn main() -> ! {
     // this requires a clean rebuild because of https://github.com/rust-lang/cargo/issues/10358
     esp_println::logger::init_logger_from_env();
     log::info!("Logger is setup");
-    println!("Hello world!");
+    println!("Hello Conway!");
+
+    let mut grid: [[bool; WIDTH]; HEIGHT] = [[false; WIDTH]; HEIGHT];
+    let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
+    for (x, y) in glider.iter() {
+        grid[*y][*x] = true;
+    }
+
     loop {
-        println!("Loop...");
-        delay.delay_ms(500u32);
+        // Update the game state
+        update_game_of_life(&mut grid);
+
+        // Draw the updated grid on the display
+        draw_grid(&mut display, &grid).unwrap();
+
+        // Refresh the display here if required by your display driver
+        // display.flush().unwrap();
+
+        // Add a delay to control the simulation speed
+        delay.delay_ms(100u32);
     }
 }
