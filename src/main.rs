@@ -24,6 +24,8 @@ use embedded_graphics::{
 const WIDTH: usize = 64;
 const HEIGHT: usize = 48;
 
+const RESET_AFTER_GENERATIONS: usize = 1500;
+
 fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
@@ -150,7 +152,7 @@ fn main() -> ! {
         }
     };
 
-    backlight.set_high();
+    let _ = backlight.set_high();
 
     // setup logger
     // To change the log_level change the env section in .cargo/config.toml
@@ -167,6 +169,7 @@ fn main() -> ! {
     for (x, y) in glider.iter() {
         grid[*y][*x] = true;
     }
+    let mut generation_count = 0;
 
     loop {
         // Update the game state
@@ -175,8 +178,12 @@ fn main() -> ! {
         // Draw the updated grid on the display
         draw_grid(&mut display, &grid).unwrap();
 
-        // Refresh the display here if required by your display driver
-        // display.flush().unwrap();
+        generation_count += 1;
+
+        if generation_count >= RESET_AFTER_GENERATIONS {
+            randomize_grid(&mut rng, &mut grid);
+            generation_count = 0; // Reset the generation counter
+        }
 
         // Add a delay to control the simulation speed
         delay.delay_ms(100u32);

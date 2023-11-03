@@ -1,34 +1,36 @@
 {
     "version": 1,
-    "editor": "wokwi",
     "author": "Juraj Michálek <juraj.michalek@espressif.com>",
+    "editor": "wokwi",
     "parts": [
-        {
-            "type": "",
-            "id": "esp",
-            "top": 0.59,
-            "left": 0.67,
-            "attrs": {
-                "flashSize": "16"
-            }
-        }
+      {
+        "type": "board-esp32-s3-devkitc-1",
+        "id": "esp",
+        "top": -494.32,
+        "left": -455.03,
+        "attrs": { "builder": "rust-std-esp32" }
+      },
+      {
+        "type": "wokwi-ili9341",
+        "id": "lcd1",
+        "top": -546.22,
+        "left": -134.92,
+        "rotate": 90,
+        "attrs": {}
+      }
     ],
     "connections": [
-        [
-            "esp:TX",
-            "$serialMonitor:RX",
-            "",
-            []
-        ],
-        [
-            "esp:RX",
-            "$serialMonitor:TX",
-            "",
-            []
-        ]
+      [ "esp:TX0", "$serialMonitor:RX", "", [] ],
+      [ "esp:RX0", "$serialMonitor:TX", "", [] ],
+      [ "esp:3V3", "lcd1:VCC", "green", [] ],
+      [ "esp:GND.1", "lcd1:GND", "black", [] ],
+      [ "esp:7", "lcd1:SCK", "blue", [] ],
+      [ "esp:6", "lcd1:MOSI", "orange", [] ],
+      [ "esp:GND.1", "lcd1:CS", "red", [] ],
+      [ "esp:4", "lcd1:D/C", "magenta", [] ],
+      [ "esp:48", "lcd1:RST", "yellow", [] ],
+      [ "lcd1:LED", "esp:3V3", "white", [] ]
     ],
-    "serialMonitor": {
-        "display": "terminal",
-        "convertEol": true
-    }
-}
+    "serialMonitor": { "display": "terminal" },
+    "dependencies": {}
+  }
