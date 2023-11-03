@@ -1,0 +1,5 @@
+[wokwi]
+version = 1
+gdbServerPort = 3333
+elf = "target/xtensa-esp32s3-none-elf/debug/esp32_conways_game_of_life_rs"
+firmware = "target/xtensa-esp32s3-none-elf/debug/esp32_conways_game_of_life_rs"
