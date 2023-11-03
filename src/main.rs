@@ -6,6 +6,7 @@ use esp_println::println;
 use hal::{clock::ClockControl, peripherals::Peripherals, prelude::*, Delay,
     IO,
     spi::{master::Spi, SpiMode},
+    Rng,
 };
 
 use display_interface_spi::SPIInterfaceNoCS;
@@ -22,6 +23,19 @@ use embedded_graphics::{
 // Define grid size
 const WIDTH: usize = 64;
 const HEIGHT: usize = 48;
+
+fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
+    for row in grid.iter_mut() {
+        for cell in row.iter_mut() {
+            // Read a single byte from the RNG
+            let mut buf = [0u8; 1];
+            rng.read(&mut buf).unwrap();
+
+            // Set the cell to be alive or dead based on the random byte
+            *cell = buf[0] & 1 != 0;
+        }
+    }
+}
 
 fn update_game_of_life(grid: &mut [[bool; WIDTH]; HEIGHT]) {
     let mut new_grid = [[false; WIDTH]; HEIGHT];
@@ -147,6 +161,8 @@ fn main() -> ! {
     println!("Hello Conway!");
 
     let mut grid: [[bool; WIDTH]; HEIGHT] = [[false; WIDTH]; HEIGHT];
+    let mut rng = Rng::new(peripherals.RNG);
+    randomize_grid(&mut rng, &mut grid);
     let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
     for (x, y) in glider.iter() {
         grid[*y][*x] = true;
