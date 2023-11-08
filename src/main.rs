@@ -5,9 +5,14 @@ use esp_backtrace as _;
 use esp_println::println;
 use hal::{
     clock::ClockControl,
+    dma::DmaPriority,
+    gdma::Gdma,
     peripherals::Peripherals,
     prelude::*,
-    spi::{master::Spi, SpiMode},
+    spi::{
+        master::{prelude::*, Spi},
+        SpiMode,
+    },
     Delay, Rng, IO,
 };
 
@@ -21,6 +26,8 @@ use embedded_graphics::{
     text::Text,
     Drawable,
 };
+
+mod spi_dma_displayinterface;
 
 // Define grid size
 const WIDTH: usize = 64;
@@ -146,7 +153,12 @@ fn main() -> ! {
     let mut backlight = io.pins.gpio45.into_push_pull_output();
     let reset = io.pins.gpio48.into_push_pull_output();
 
-    println!("SPI LED driver initialized");
+    let dma = Gdma::new(peripherals.DMA);
+    let dma_channel = dma.channel0;
+
+    let mut descriptors = [0u32; 8 * 3];
+    let mut rx_descriptors = [0u32; 8 * 3];
+
     let spi = Spi::new_no_cs_no_miso(
         peripherals.SPI2,
         sclk,
@@ -154,11 +166,19 @@ fn main() -> ! {
         60u32.MHz(),
         SpiMode::Mode0,
         &clocks,
-    );
+    // );
+    
+    ).with_dma(dma_channel.configure(
+        false,
+        &mut descriptors,
+        &mut rx_descriptors,
+        DmaPriority::Priority0,
+    ));
 
     println!("SPI ready");
 
-    let di = SPIInterfaceNoCS::new(spi, dc);
+    // let di = SPIInterfaceNoCS::new(spi, dc);
+    let di = spi_dma_displayinterface::SPIInterfaceNoCS::new(spi, dc);
 
     // ESP32-S3-BOX display initialization workaround: Wait for the display to power up.
     // If delay is 250ms, picture will be fuzzy.
