@@ -6,33 +6,28 @@ use core::cell::RefCell;
 
 use display_interface::{DataFormat, DisplayError, WriteOnlyDataCommand};
 use hal::{
-    dma::{Rx, SpiPeripheral, Tx, ChannelTypes},
+    dma::{SpiPeripheral, ChannelTypes},
     prelude::_esp_hal_dma_DmaTransfer,
     spi::{
-        master::{prelude::*, Spi},
-        SpiMode, DuplexMode,
+        DuplexMode, IsFullDuplex,
     },
 };
 use hal::gpio::OutputPin;
 use hal::spi::master::dma::SpiDmaTransfer;
 use hal::spi::master::InstanceDma;
-use hal::spi::master::dma;
-use core::marker::PhantomData;
 
 const DMA_BUFFER_SIZE: usize = 2048;
 type SpiDma<'d, T, C, M> = hal::spi::master::dma::SpiDma<'d, T, C, M>;
 
-fn send_u8<'d, T, C, M, TX, RX, P>(
+fn send_u8<'d, T, C, M>(
     spi: SpiDma<'d, T, C, M>,
     words: DataFormat<'_>,
 ) -> Result<SpiDma<'d, T, C, M>, DisplayError>
 where
-    T: InstanceDma<TX, RX>,
+    T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
-    M: DuplexMode,
-    TX: Tx,
-    RX: Rx,
-    <C as ChannelTypes>::P: SpiPeripheral
+    C::P: SpiPeripheral,
+    M: DuplexMode + IsFullDuplex,
 {
     match words {
         DataFormat::U8(slice) => {
@@ -40,7 +35,7 @@ where
             send_buffer[..slice.len()].copy_from_slice(slice);
 
             let transfer = spi.dma_write(&send_buffer[..slice.len()]).unwrap();
-            let (_, spi) = transfer.wait();
+            let (_, spi) = transfer.wait().unwrap();
             Ok(spi)
         }
         DataFormat::U16(slice) => {
@@ -50,7 +45,7 @@ where
             send_buffer[..slice.len() * 2].copy_from_slice(slice.as_byte_slice());
 
             let transfer = spi.dma_write(&send_buffer[..slice.len() * 2]).unwrap();
-            let (_, spi) = transfer.wait();
+            let (_, spi) = transfer.wait().unwrap();
             Ok(spi)
         }
         DataFormat::U16LE(slice) => {
@@ -63,7 +58,7 @@ where
             send_buffer[..slice.len() * 2].copy_from_slice(slice.as_byte_slice());
 
             let transfer = spi.dma_write(&send_buffer[..slice.len() * 2]).unwrap();
-            let (_, spi) = transfer.wait();
+            let (_, spi) = transfer.wait().unwrap();
             Ok(spi)
         }
         DataFormat::U16BE(slice) => {
@@ -76,7 +71,7 @@ where
             send_buffer[..slice.len() * 2].copy_from_slice(slice.as_byte_slice());
 
             let transfer = spi.dma_write(&send_buffer[..slice.len() * 2]).unwrap();
-            let (_, spi) = transfer.wait();
+            let (_, spi) = transfer.wait().unwrap();
             Ok(spi)
         }
         DataFormat::U8Iter(iter) => {
@@ -103,7 +98,7 @@ where
 
                 if idx > 0 {
                     let transfer = spi.dma_write(&mut send_buffer[..idx]).unwrap();
-                    (send_buffer, spi) = transfer.wait();
+                    (send_buffer, spi) = transfer.wait().unwrap();
                 } else {
                     break;
                 }
@@ -118,10 +113,10 @@ where
             let mut spi = Some(spi);
 
             let mut current_buffer = 0;
-            let mut transfer: Option<SpiDmaTransfer<T, C, BUFFER, M> = None;
+            let mut transfer: Option<SpiDmaTransfer<'d, T, C, _, M>> = None;
             loop {
                 if let Some(transfer) = transfer {
-                    let (relaimed_buffer, reclaimed_spi) = transfer.wait();
+                    let (relaimed_buffer, reclaimed_spi) = transfer.wait().unwrap();
                     spi = Some(reclaimed_spi);
                     send_buffer[current_buffer].replace(Some(relaimed_buffer));
 
@@ -165,7 +160,7 @@ where
             let mut spi = Some(spi);
 
             let mut current_buffer = 0;
-            let mut transfer: Option<SpiDmaTransfer<T, TX, RX, P, _>> = None;
+            let mut transfer: Option<SpiDmaTransfer<'d, T, C, _, M>> = None;
             loop {
                 let buffer = send_buffer[current_buffer].take().unwrap();
                 let mut idx = 0;
@@ -188,7 +183,7 @@ where
                 }
 
                 if let Some(transfer) = transfer {
-                    let (relaimed_buffer, reclaimed_spi) = transfer.wait();
+                    let (relaimed_buffer, reclaimed_spi) = transfer.wait().unwrap();
                     spi = Some(reclaimed_spi);
                     let done_buffer = current_buffer.wrapping_sub(1) % send_buffer.len();
                     send_buffer[done_buffer].replace(Some(relaimed_buffer));
@@ -210,35 +205,29 @@ where
 /// SPI display interface.
 ///
 /// This combines the SPI peripheral and a data/command as well as a chip-select pin
-pub struct SPIInterface<'d, DC, CS, T, C, M, TX, RX>
+pub struct SPIInterface<'d, DC, CS, T, C, M>
 where
     DC: OutputPin,
     CS: OutputPin,
-    T: InstanceDma<TX, RX>,
+    T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
     M: DuplexMode,
-    TX: Tx,
-    RX: Rx,
 {
     spi: RefCell<Option<SpiDma<'d, T, C, M>>>,
     dc: DC,
     cs: CS,
-    _tx: PhantomData<TX>,
-    _rx: PhantomData<RX>,
 }
 
 #[allow(unused)]
-impl<'d, DC, CS, T, C, M, TX, RX> SPIInterface<'d, DC, CS, T, C, M, TX, RX>
+impl<'d, DC, CS, T, C, M> SPIInterface<'d, DC, CS, T, C, M>
 where
     DC: OutputPin,
     CS: OutputPin,
-    T: InstanceDma<TX, RX>,
+    T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
     M: DuplexMode,
-    TX: Tx,
-    RX: Rx,
 {
     pub fn new(spi: SpiDma<'d, T, C, M>, dc: DC, cs: CS) -> Self {
         Self {
@@ -255,16 +244,14 @@ where
     }
 }
 
-impl<'d, DC, CS, T, C, M, TX, RX> WriteOnlyDataCommand for SPIInterface<'d, DC, CS, T, C, M, TX, RX>
+impl<'d, DC, CS, T, C, M> WriteOnlyDataCommand for SPIInterface<'d, DC, CS, T, C, M>
 where
-    DC: OutputPin,
-    CS: OutputPin,
-    T: InstanceDma<TX, RX>,
+    DC: OutputPin + hal::prelude::_embedded_hal_digital_v2_OutputPin,
+    CS: OutputPin + hal::prelude::_embedded_hal_digital_v2_OutputPin,
+    T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
-    M: DuplexMode,
-    TX: Tx,
-    RX: Rx,
+    M: DuplexMode + IsFullDuplex,
 {
     fn send_commands(&mut self, cmds: DataFormat<'_>) -> Result<(), DisplayError> {
         // Assert chip select pin
@@ -314,32 +301,26 @@ where
 /// SPI display interface.
 ///
 /// This combines the SPI peripheral and a data/command pin
-pub struct SPIInterfaceNoCS<'d, DC, T, C, M, TX, RX>
+pub struct SPIInterfaceNoCS<'d, DC, T, C, M>
 where
     DC: OutputPin,
-    T: InstanceDma<TX, RX>,
+    T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
     M: DuplexMode,
-    TX: Tx,
-    RX: Rx,
 {
     spi: RefCell<Option<SpiDma<'d, T, C, M>>>,
     dc: DC,
-    _tx: PhantomData<TX>, // Include PhantomData for TX
-    _rx: PhantomData<RX>, // Include PhantomData for RX
 }
 
 #[allow(unused)]
-impl<'d, DC, T, C, M, TX, RX> SPIInterfaceNoCS<'d, DC, T, C, M, TX, RX>
+impl<'d, DC, T, C, M> SPIInterfaceNoCS<'d, DC, T, C, M>
 where
     DC: OutputPin,
-    T: InstanceDma<TX, RX>,
+    T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
     M: DuplexMode,
-    TX: Tx,
-    RX: Rx,
 {
     /// Create new SPI interface for communciation with a display driver
     pub fn new(spi: SpiDma<'d, T, C, M>, dc: DC) -> Self {
@@ -356,15 +337,13 @@ where
     }
 }
 
-impl<'d, DC, T, C, M, TX, RX> WriteOnlyDataCommand for SPIInterfaceNoCS<'d, DC, T, C, M, TX, RX>
+impl<'d, DC, T, C, M> WriteOnlyDataCommand for SPIInterfaceNoCS<'d, DC, T, C, M>
 where
-    DC: OutputPin,
-    T: InstanceDma<TX, RX>,
+    DC: OutputPin + hal::prelude::_embedded_hal_digital_v2_OutputPin,
+    T: InstanceDma<C::Tx<'d>, C::Rx<'d>>,
     C: ChannelTypes,
     C::P: SpiPeripheral,
-    M: DuplexMode,
-    TX: Tx,
-    RX: Rx,
+    M: DuplexMode + IsFullDuplex,
 {
     fn send_commands(&mut self, cmds: DataFormat<'_>) -> Result<(), DisplayError> {
         // 1 = data, 0 = command
