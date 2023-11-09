@@ -147,6 +147,8 @@ fn main() -> ! {
 
     let sclk = io.pins.gpio7;
     let mosi = io.pins.gpio6;
+    let cs = io.pins.gpio5;
+    let miso = io.pins.gpio2;
     // let sda = io.pins.gpio8;
     // let scl = io.pins.gpio18;
     let dc = io.pins.gpio4.into_push_pull_output();
@@ -159,10 +161,12 @@ fn main() -> ! {
     let mut descriptors = [0u32; 8 * 3];
     let mut rx_descriptors = [0u32; 8 * 3];
 
-    let spi = Spi::new_no_cs_no_miso(
+    let spi = Spi::new(
         peripherals.SPI2,
         sclk,
         mosi,
+        miso,
+        cs,
         60u32.MHz(),
         SpiMode::Mode0,
         &clocks,
