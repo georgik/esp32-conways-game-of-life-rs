@@ -1,10 +1,12 @@
 #![no_std]
 #![no_main]
 
+use spi_dma_displayinterface::spi_dma_displayinterface::SPIInterfaceNoCS;
+
 use esp_backtrace as _;
 use esp_println::println;
 use hal::{
-    clock::ClockControl,
+    clock::{ClockControl, CpuClock},
     dma::DmaPriority,
     gdma::Gdma,
     peripherals::Peripherals,
@@ -16,7 +18,6 @@ use hal::{
     Delay, Rng, IO,
 };
 
-use display_interface_spi::SPIInterfaceNoCS;
 use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -24,10 +25,10 @@ use embedded_graphics::{
     prelude::{DrawTarget, Point, RgbColor},
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
-    Drawable,
+    Drawable, iterator::pixel,
 };
 
-mod spi_dma_displayinterface;
+use embedded_graphics_framebuf::FrameBuf;
 
 // Define grid size
 const WIDTH: usize = 64;
@@ -139,7 +140,8 @@ fn main() -> ! {
     let peripherals = Peripherals::take();
     let system = peripherals.SYSTEM.split();
 
-    let clocks = ClockControl::max(system.clock_control).freeze();
+    // let clocks = ClockControl::max(system.clock_control).freeze();
+    let clocks = ClockControl::configure(system.clock_control, CpuClock::Clock240MHz).freeze();
     let mut delay = Delay::new(&clocks);
 
     println!("About to initialize the SPI LED driver");
@@ -170,8 +172,6 @@ fn main() -> ! {
         60u32.MHz(),
         SpiMode::Mode0,
         &clocks,
-    // );
-    
     ).with_dma(dma_channel.configure(
         false,
         &mut descriptors,
@@ -181,8 +181,7 @@ fn main() -> ! {
 
     println!("SPI ready");
 
-    // let di = SPIInterfaceNoCS::new(spi, dc);
-    let di = spi_dma_displayinterface::SPIInterfaceNoCS::new(spi, dc);
+    let di = SPIInterfaceNoCS::new(spi, dc);
 
     // ESP32-S3-BOX display initialization workaround: Wait for the display to power up.
     // If delay is 250ms, picture will be fuzzy.
@@ -221,12 +220,15 @@ fn main() -> ! {
     }
     let mut generation_count = 0;
 
+    let mut data = [Rgb565::BLACK; 320 * 240];
+    let mut fbuf = FrameBuf::new(&mut data, 320, 240);
+
     loop {
         // Update the game state
         update_game_of_life(&mut grid);
 
         // Draw the updated grid on the display
-        draw_grid(&mut display, &grid).unwrap();
+        draw_grid(&mut fbuf, &grid).unwrap();
 
         generation_count += 1;
 
@@ -235,7 +237,10 @@ fn main() -> ! {
             generation_count = 0; // Reset the generation counter
         }
 
-        write_generation(&mut display, generation_count).unwrap();
+        write_generation(&mut fbuf, generation_count).unwrap();
+
+        let pixel_iterator = fbuf.into_iter().map(|p| p.1);
+        let _ = display.set_pixels(0, 0, 319, 240, pixel_iterator);
 
         // Add a delay to control the simulation speed
         delay.delay_ms(100u32);
