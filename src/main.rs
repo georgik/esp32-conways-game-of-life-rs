@@ -1,17 +1,23 @@
 #![no_std]
 #![no_main]
 
+use spi_dma_displayinterface::spi_dma_displayinterface::SPIInterfaceNoCS;
+
 use esp_backtrace as _;
 use esp_println::println;
 use hal::{
-    clock::ClockControl,
+    clock::{ClockControl, CpuClock},
+    dma::DmaPriority,
+    gdma::Gdma,
     peripherals::Peripherals,
     prelude::*,
-    spi::{master::Spi, SpiMode},
+    spi::{
+        master::{prelude::*, Spi},
+        SpiMode,
+    },
     Delay, Rng, IO,
 };
 
-use display_interface_spi::SPIInterfaceNoCS;
 use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -21,6 +27,8 @@ use embedded_graphics::{
     text::Text,
     Drawable,
 };
+
+use embedded_graphics_framebuf::FrameBuf;
 
 // Define grid size
 const WIDTH: usize = 64;
@@ -116,12 +124,32 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     grid: &[[bool; WIDTH]; HEIGHT],
 ) -> Result<(), D::Error> {
+    // Define the border color
+    let border_color = Rgb565::new(230, 230, 230); // Gray color
+
     for (y, row) in grid.iter().enumerate() {
         for (x, &cell) in row.iter().enumerate() {
-            let color = if cell { Rgb565::WHITE } else { Rgb565::BLACK };
-            Rectangle::new(Point::new(x as i32 * 5, y as i32 * 5), Size::new(5, 5))
-                .into_styled(PrimitiveStyle::with_fill(color))
-                .draw(display)?;
+            if cell {
+                // Live cell with border
+                // Define the size of the cells and borders
+                let cell_size = Size::new(5, 5);
+                let border_size = Size::new(7, 7); // Slightly larger for the border
+
+                // Draw the border rectangle
+                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), border_size)
+                    .into_styled(PrimitiveStyle::with_fill(border_color))
+                    .draw(display)?;
+
+                // Draw the inner cell rectangle (white)
+                Rectangle::new(Point::new(x as i32 * 7 + 1, y as i32 * 7 + 1), cell_size)
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
+                    .draw(display)?;
+            } else {
+                // Dead cell without border (black)
+                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), Size::new(7, 7))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                    .draw(display)?;
+            }
         }
     }
     Ok(())
@@ -132,7 +160,8 @@ fn main() -> ! {
     let peripherals = Peripherals::take();
     let system = peripherals.SYSTEM.split();
 
-    let clocks = ClockControl::max(system.clock_control).freeze();
+    // let clocks = ClockControl::max(system.clock_control).freeze();
+    let clocks = ClockControl::configure(system.clock_control, CpuClock::Clock240MHz).freeze();
     let mut delay = Delay::new(&clocks);
 
     println!("About to initialize the SPI LED driver");
@@ -140,21 +169,36 @@ fn main() -> ! {
 
     let sclk = io.pins.gpio7;
     let mosi = io.pins.gpio6;
+    let cs = io.pins.gpio5;
+    let miso = io.pins.gpio2;
     // let sda = io.pins.gpio8;
     // let scl = io.pins.gpio18;
     let dc = io.pins.gpio4.into_push_pull_output();
     let mut backlight = io.pins.gpio45.into_push_pull_output();
     let reset = io.pins.gpio48.into_push_pull_output();
 
-    println!("SPI LED driver initialized");
-    let spi = Spi::new_no_cs_no_miso(
+    let dma = Gdma::new(peripherals.DMA);
+    let dma_channel = dma.channel0;
+
+    let mut descriptors = [0u32; 8 * 3];
+    let mut rx_descriptors = [0u32; 8 * 3];
+
+    let spi = Spi::new(
         peripherals.SPI2,
         sclk,
         mosi,
+        miso,
+        cs,
         60u32.MHz(),
         SpiMode::Mode0,
         &clocks,
-    );
+    )
+    .with_dma(dma_channel.configure(
+        false,
+        &mut descriptors,
+        &mut rx_descriptors,
+        DmaPriority::Priority0,
+    ));
 
     println!("SPI ready");
 
@@ -197,12 +241,15 @@ fn main() -> ! {
     }
     let mut generation_count = 0;
 
+    let mut data = [Rgb565::BLACK; 320 * 240];
+    let mut fbuf = FrameBuf::new(&mut data, 320, 240);
+
     loop {
         // Update the game state
         update_game_of_life(&mut grid);
 
         // Draw the updated grid on the display
-        draw_grid(&mut display, &grid).unwrap();
+        draw_grid(&mut fbuf, &grid).unwrap();
 
         generation_count += 1;
 
@@ -211,7 +258,10 @@ fn main() -> ! {
             generation_count = 0; // Reset the generation counter
         }
 
-        write_generation(&mut display, generation_count).unwrap();
+        write_generation(&mut fbuf, generation_count).unwrap();
+
+        let pixel_iterator = fbuf.into_iter().map(|p| p.1);
+        let _ = display.set_pixels(0, 0, 319, 240, pixel_iterator);
 
         // Add a delay to control the simulation speed
         delay.delay_ms(100u32);
