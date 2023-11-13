@@ -25,7 +25,7 @@ use embedded_graphics::{
     prelude::{DrawTarget, Point, RgbColor},
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
-    Drawable, iterator::pixel,
+    Drawable,
 };
 
 use embedded_graphics_framebuf::FrameBuf;
@@ -124,12 +124,32 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     grid: &[[bool; WIDTH]; HEIGHT],
 ) -> Result<(), D::Error> {
+    // Define the border color
+    let border_color = Rgb565::new(230, 230, 230); // Gray color
+
     for (y, row) in grid.iter().enumerate() {
         for (x, &cell) in row.iter().enumerate() {
-            let color = if cell { Rgb565::WHITE } else { Rgb565::BLACK };
-            Rectangle::new(Point::new(x as i32 * 5, y as i32 * 5), Size::new(5, 5))
-                .into_styled(PrimitiveStyle::with_fill(color))
-                .draw(display)?;
+            if cell {
+                // Live cell with border
+                // Define the size of the cells and borders
+                let cell_size = Size::new(5, 5);
+                let border_size = Size::new(7, 7); // Slightly larger for the border
+
+                // Draw the border rectangle
+                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), border_size)
+                    .into_styled(PrimitiveStyle::with_fill(border_color))
+                    .draw(display)?;
+
+                // Draw the inner cell rectangle (white)
+                Rectangle::new(Point::new(x as i32 * 7 + 1, y as i32 * 7 + 1), cell_size)
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
+                    .draw(display)?;
+            } else {
+                // Dead cell without border (black)
+                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), Size::new(7, 7))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
+                    .draw(display)?;
+            }
         }
     }
     Ok(())
@@ -172,7 +192,8 @@ fn main() -> ! {
         60u32.MHz(),
         SpiMode::Mode0,
         &clocks,
-    ).with_dma(dma_channel.configure(
+    )
+    .with_dma(dma_channel.configure(
         false,
         &mut descriptors,
         &mut rx_descriptors,
