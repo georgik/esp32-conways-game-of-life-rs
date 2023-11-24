@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use spi_dma_displayinterface::spi_dma_displayinterface::SPIInterfaceNoCS;
+use spi_dma_displayinterface::spi_dma_displayinterface;
 
 use esp_backtrace as _;
 use esp_println::println;
@@ -202,7 +202,7 @@ fn main() -> ! {
 
     println!("SPI ready");
 
-    let di = SPIInterfaceNoCS::new(spi, dc);
+    let di = spi_dma_displayinterface::new_no_cs(320 * 240 *2, spi, dc);
 
     // ESP32-S3-BOX display initialization workaround: Wait for the display to power up.
     // If delay is 250ms, picture will be fuzzy.
