@@ -167,10 +167,10 @@ fn main() -> ! {
     println!("About to initialize the SPI LED driver");
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
 
-    let sclk = io.pins.gpio7;
-    let mosi = io.pins.gpio6;
-    let cs = io.pins.gpio5;
-    let miso = io.pins.gpio2;
+    let lcd_sclk = io.pins.gpio7;
+    let lcd_mosi = io.pins.gpio6;
+    let lcd_cs = io.pins.gpio5;
+    let lcd_miso = io.pins.gpio2;
     // let sda = io.pins.gpio8;
     // let scl = io.pins.gpio18;
     let dc = io.pins.gpio4.into_push_pull_output();
@@ -185,13 +185,14 @@ fn main() -> ! {
 
     let spi = Spi::new(
         peripherals.SPI2,
-        sclk,
-        mosi,
-        miso,
-        cs,
         60u32.MHz(),
         SpiMode::Mode0,
         &clocks,
+    ).with_pins(
+        Some(lcd_sclk),
+        Some(lcd_mosi),
+        Some(lcd_miso),
+        Some(lcd_cs),
     )
     .with_dma(dma_channel.configure(
         false,
