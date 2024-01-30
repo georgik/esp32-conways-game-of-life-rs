@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use spi_dma_displayinterface::spi_dma_displayinterface;
+use esp_display_interface_spi_dma::display_interface_spi_dma;
 
 use esp_backtrace as _;
 use esp_println::println;
@@ -29,6 +29,8 @@ use embedded_graphics::{
 };
 
 use embedded_graphics_framebuf::FrameBuf;
+
+use esp_bsp::lcd_gpios;
 
 // Define grid size
 const WIDTH: usize = 64;
@@ -166,16 +168,8 @@ fn main() -> ! {
 
     println!("About to initialize the SPI LED driver");
     let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-
-    let lcd_sclk = io.pins.gpio7;
-    let lcd_mosi = io.pins.gpio6;
-    let lcd_cs = io.pins.gpio5;
-    let lcd_miso = io.pins.gpio2;
-    // let sda = io.pins.gpio8;
-    // let scl = io.pins.gpio18;
-    let dc = io.pins.gpio4.into_push_pull_output();
-    let mut backlight = io.pins.gpio45.into_push_pull_output();
-    let reset = io.pins.gpio48.into_push_pull_output();
+    let (lcd_sclk, lcd_mosi, lcd_cs, lcd_miso, lcd_dc, mut lcd_backlight, lcd_reset) =
+        lcd_gpios!(BoardType::ESP32S3Box, io);
 
     let dma = Gdma::new(peripherals.DMA);
     let dma_channel = dma.channel0;
@@ -183,27 +177,18 @@ fn main() -> ! {
     let mut descriptors = [0u32; 8 * 3];
     let mut rx_descriptors = [0u32; 8 * 3];
 
-    let spi = Spi::new(
-        peripherals.SPI2,
-        60u32.MHz(),
-        SpiMode::Mode0,
-        &clocks,
-    ).with_pins(
-        Some(lcd_sclk),
-        Some(lcd_mosi),
-        Some(lcd_miso),
-        Some(lcd_cs),
-    )
-    .with_dma(dma_channel.configure(
-        false,
-        &mut descriptors,
-        &mut rx_descriptors,
-        DmaPriority::Priority0,
-    ));
+    let spi = Spi::new(peripherals.SPI2, 60u32.MHz(), SpiMode::Mode0, &clocks)
+        .with_pins(Some(lcd_sclk), Some(lcd_mosi), Some(lcd_miso), Some(lcd_cs))
+        .with_dma(dma_channel.configure(
+            false,
+            &mut descriptors,
+            &mut rx_descriptors,
+            DmaPriority::Priority0,
+        ));
 
     println!("SPI ready");
 
-    let di = spi_dma_displayinterface::new_no_cs(320 * 240 *2, spi, dc);
+    let di = display_interface_spi_dma::new_no_cs(320 * 240 * 2, spi, lcd_dc);
 
     // ESP32-S3-BOX display initialization workaround: Wait for the display to power up.
     // If delay is 250ms, picture will be fuzzy.
@@ -214,7 +199,7 @@ fn main() -> ! {
         .with_display_size(320, 240)
         .with_orientation(mipidsi::Orientation::PortraitInverted(false))
         .with_color_order(mipidsi::ColorOrder::Bgr)
-        .init(&mut delay, Some(reset))
+        .init(&mut delay, Some(lcd_reset))
     {
         Ok(display) => display,
         Err(_e) => {
@@ -223,7 +208,7 @@ fn main() -> ! {
         }
     };
 
-    let _ = backlight.set_high();
+    let _ = lcd_backlight.set_high();
 
     // setup logger
     // To change the log_level change the env section in .cargo/config.toml
