@@ -177,7 +177,7 @@ fn main() -> ! {
     let mut descriptors = [0u32; 8 * 3];
     let mut rx_descriptors = [0u32; 8 * 3];
 
-    let spi = Spi::new(peripherals.SPI2, 60u32.MHz(), SpiMode::Mode0, &clocks)
+    let spi = Spi::new(peripherals.SPI2, 40u32.MHz(), SpiMode::Mode0, &clocks)
         .with_pins(Some(lcd_sclk), Some(lcd_mosi), Some(lcd_miso), Some(lcd_cs))
         .with_dma(dma_channel.configure(
             false,
