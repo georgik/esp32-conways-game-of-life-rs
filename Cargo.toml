@@ -6,9 +6,11 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-hal = { package = "esp32s3-hal", version = "0.15.0" }
-esp-backtrace = { version = "0.10.0", features = ["esp32s3", "panic-handler", "exception-handler", "print-uart"] }
-esp-println = { version = "0.8.0", features = ["esp32s3","log"] }
+# hal = { version = "0.16.0", features = ["esp32c3"] }
+esp-hal = { version = "0.17.0", features = [ "esp32s3" ] }
+# hal = { package = "esp32s3-hal", version = "0.15.1" }
+esp-backtrace = { version = "0.11.1", features = [ "esp32s3", "panic-handler", "exception-handler", "println" ] }
+esp-println = { version = "0.9.1", features = ["esp32s3","log"] }
 log = { version = "0.4.18" }
 mipidsi = "0.7.1"
 embedded-graphics = "0.8.1"
@@ -17,5 +19,5 @@ display-interface = "0.4.1"
 display-interface-spi = "0.4.1"
 heapless = "0.8.0"
 embedded-dma = "0.2.0"
-esp-bsp = { version = "0.1.0" }
-esp-display-interface-spi-dma = { git = "https://github.com/georgik/esp-display-interface-spi-dma.git", features = ["esp32s3"] }
+esp-bsp = { version = "0.2.0" }
+esp-display-interface-spi-dma = { path = "../esp-display-interface-spi-dma", features = [ "esp32s3" ] }
