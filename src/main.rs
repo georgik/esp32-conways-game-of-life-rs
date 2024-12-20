@@ -1,22 +1,8 @@
 #![no_std]
 #![no_main]
 
+use esp_bsp::prelude::*;
 use esp_display_interface_spi_dma::display_interface_spi_dma;
-
-use esp_backtrace as _;
-use esp_println::println;
-use hal::{
-    clock::{ClockControl, CpuClock},
-    dma::DmaPriority,
-    gdma::Gdma,
-    peripherals::Peripherals,
-    prelude::*,
-    spi::{
-        master::{prelude::*, Spi},
-        SpiMode,
-    },
-    Delay, Rng, IO,
-};
 
 use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
@@ -27,10 +13,23 @@ use embedded_graphics::{
     text::Text,
     Drawable,
 };
+#[allow(unused_imports)]
+use esp_backtrace as _;
+use esp_hal::gpio::OutputOpenDrain;
+use esp_hal::gpio::Pull;
+use esp_hal::rng::Rng;
+use esp_hal::{
+    delay::Delay,
+    dma::Dma,
+    dma::DmaPriority,
+    gpio::{Level, Output},
+    prelude::*,
+    spi::master::Spi,
+};
 
 use embedded_graphics_framebuf::FrameBuf;
-
-use esp_bsp::lcd_gpios;
+use embedded_hal::delay::DelayNs;
+use log::info;
 
 // Define grid size
 const WIDTH: usize = 64;
@@ -68,7 +67,7 @@ fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
         for cell in row.iter_mut() {
             // Read a single byte from the RNG
             let mut buf = [0u8; 1];
-            rng.read(&mut buf).unwrap();
+            rng.read(&mut buf);
 
             // Set the cell to be alive or dead based on the random byte
             *cell = buf[0] & 1 != 0;
@@ -159,64 +158,21 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
 
 #[entry]
 fn main() -> ! {
-    let peripherals = Peripherals::take();
-    let system = peripherals.SYSTEM.split();
-
-    // let clocks = ClockControl::max(system.clock_control).freeze();
-    let clocks = ClockControl::configure(system.clock_control, CpuClock::Clock240MHz).freeze();
-    let mut delay = Delay::new(&clocks);
-
-    println!("About to initialize the SPI LED driver");
-    let io = IO::new(peripherals.GPIO, peripherals.IO_MUX);
-    let (lcd_sclk, lcd_mosi, lcd_cs, lcd_miso, lcd_dc, mut lcd_backlight, lcd_reset) =
-        lcd_gpios!(BoardType::ESP32S3Box, io);
-
-    let dma = Gdma::new(peripherals.DMA);
-    let dma_channel = dma.channel0;
-
-    let mut descriptors = [0u32; 8 * 3];
-    let mut rx_descriptors = [0u32; 8 * 3];
-
-    let spi = Spi::new(peripherals.SPI2, 40u32.MHz(), SpiMode::Mode0, &clocks)
-        .with_pins(Some(lcd_sclk), Some(lcd_mosi), Some(lcd_miso), Some(lcd_cs))
-        .with_dma(dma_channel.configure(
-            false,
-            &mut descriptors,
-            &mut rx_descriptors,
-            DmaPriority::Priority0,
-        ));
-
-    println!("SPI ready");
-
-    let di = display_interface_spi_dma::new_no_cs(320 * 240 * 2, spi, lcd_dc);
-
-    // ESP32-S3-BOX display initialization workaround: Wait for the display to power up.
-    // If delay is 250ms, picture will be fuzzy.
-    // If there is no delay, display is blank
-    delay.delay_ms(500u32);
-
-    let mut display = match mipidsi::Builder::ili9342c_rgb565(di)
-        .with_display_size(320, 240)
-        .with_orientation(mipidsi::Orientation::PortraitInverted(false))
-        .with_color_order(mipidsi::ColorOrder::Bgr)
-        .init(&mut delay, Some(lcd_reset))
-    {
-        Ok(display) => display,
-        Err(_e) => {
-            // Handle the error and possibly exit the application
-            panic!("Display initialization failed");
-        }
-    };
-
-    let _ = lcd_backlight.set_high();
-
-    // setup logger
-    // To change the log_level change the env section in .cargo/config.toml
-    // or remove it and set ESP_LOGLEVEL manually before running cargo run
-    // this requires a clean rebuild because of https://github.com/rust-lang/cargo/issues/10358
+    const LCD_MEMORY_SIZE: usize = 320 * 240 * 2;
+    let peripherals = esp_hal::init(esp_hal::Config::default());
     esp_println::logger::init_logger_from_env();
-    log::info!("Logger is setup");
-    println!("Hello Conway!");
+
+    let spi = lcd_spi!(peripherals);
+    let di = lcd_display_interface!(peripherals, spi);
+    let mut delay = Delay::new();
+    delay.delay_ns(500_000u32);
+
+    let mut display = lcd_display!(peripherals, di).init(&mut delay).unwrap();
+
+    // Use the `lcd_backlight_init` macro to turn on the backlight
+    lcd_backlight_init!(peripherals);
+
+    info!("Hello Conway!");
 
     let mut grid: [[bool; WIDTH]; HEIGHT] = [[false; WIDTH]; HEIGHT];
     let mut rng = Rng::new(peripherals.RNG);
