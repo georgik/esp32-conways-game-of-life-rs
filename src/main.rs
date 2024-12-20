@@ -158,7 +158,6 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
 
 #[entry]
 fn main() -> ! {
-    const LCD_MEMORY_SIZE: usize = 320 * 240 * 2;
     let peripherals = esp_hal::init(esp_hal::Config::default());
     esp_println::logger::init_logger_from_env();
 

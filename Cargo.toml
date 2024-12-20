@@ -20,7 +20,7 @@ embedded-graphics = "0.8.0"
 embedded-hal = "1.0.0"
 mipidsi = "0.8.0"
 esp-display-interface-spi-dma = "0.2.0"
-esp-bsp = "0.4.0"
+esp-bsp = "0.4.1"
 embedded-graphics-framebuf = { version = "0.3.0", git = "https://github.com/georgik/embedded-graphics-framebuf.git", branch = "feature/embedded-graphics-0.8" }
 heapless = "0.8.0"
 
