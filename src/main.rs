@@ -20,11 +20,10 @@ use esp_hal::gpio::Pull;
 use esp_hal::rng::Rng;
 use esp_hal::{
     delay::Delay,
-    dma::Dma,
     dma::DmaPriority,
     gpio::{Level, Output},
-    prelude::*,
     spi::master::Spi,
+    main
 };
 
 use embedded_graphics_framebuf::FrameBuf;
@@ -156,7 +155,7 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     Ok(())
 }
 
-#[entry]
+#[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     esp_println::logger::init_logger_from_env();

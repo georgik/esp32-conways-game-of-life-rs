@@ -7,19 +7,20 @@ license = "MIT OR Apache-2.0"
 
 
 [dependencies]
-esp-hal = "0.22.0"
-esp-backtrace = { version = "0.14.2", features = [
+esp-hal = "0.23.1"
+esp-backtrace = { version = "0.15.0", features = [
     "panic-handler",
     "println"
 ] }
-esp-println = { version = "0.12.0", features = [ "log" ] }
+esp-println = { version = "0.13.0", features = [ "log" ] }
 log = { version = "0.4.21" }
 
-esp-alloc = "0.5.0"
+esp-alloc = "0.6.0"
 embedded-graphics = "0.8.0"
 embedded-hal = "1.0.0"
-mipidsi = "0.8.0"
-esp-display-interface-spi-dma = "0.2.0"
+mipidsi = "0.9.0"
+#esp-display-interface-spi-dma = "0.3.0"
+esp-display-interface-spi-dma = { path = "../esp-display-interface-spi-dma"}
 esp-bsp = "0.4.1"
 embedded-graphics-framebuf = { version = "0.3.0", git = "https://github.com/georgik/embedded-graphics-framebuf.git", branch = "feature/embedded-graphics-0.8" }
 heapless = "0.8.0"
