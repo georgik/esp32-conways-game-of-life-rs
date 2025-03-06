@@ -29,11 +29,9 @@ use log::info;
 use mipidsi::{interface::SpiInterface, options::ColorInversion};
 
 use mipidsi::{models::ST7789, Builder};
-// Bevy ECS (no_std) imports:
 use bevy_ecs::prelude::*;
 
 // --- Type Alias for the Concrete Display ---
-// Now we specify that the SPI interface uses Delay.
 type MyDisplay = mipidsi::Display<
     SpiInterface<
         'static,
