@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
-use esp_bsp::prelude::*;
-use esp_display_interface_spi_dma::display_interface_spi_dma;
-
+// use esp_bsp::prelude::*;
+// use esp_display_interface_spi_dma::display_interface_spi_dma;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -15,18 +15,17 @@ use embedded_graphics::{
 };
 #[allow(unused_imports)]
 use esp_backtrace as _;
-use esp_hal::gpio::OutputOpenDrain;
-use esp_hal::gpio::Pull;
+// use esp_hal::gpio::OutputOpenDrain;
 use esp_hal::rng::Rng;
 use esp_hal::{
     delay::Delay,
-    dma::DmaPriority,
-    gpio::{Level, Output},
+    gpio::{Level, Output, OutputConfig, DriveMode},
     spi::master::Spi,
-    main
+    main,
+    time::Rate,
 };
-
-use embedded_graphics_framebuf::FrameBuf;
+use mipidsi::interface::SpiInterface;
+// use embedded_graphics_framebuf::FrameBuf;
 use embedded_hal::delay::DelayNs;
 use log::info;
 
@@ -37,8 +36,10 @@ const HEIGHT: usize = 48;
 const RESET_AFTER_GENERATIONS: usize = 500;
 
 use core::fmt::Write;
-
+// use esp_hal::dma::Owner::Dma;
+use esp_hal::spi::Mode;
 use heapless::String;
+use mipidsi::{models::ILI9486Rgb565, Builder};
 
 fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
@@ -160,15 +161,70 @@ fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
     esp_println::logger::init_logger_from_env();
 
-    let spi = lcd_spi!(peripherals);
-    let di = lcd_display_interface!(peripherals, spi);
+    // let spi = lcd_spi!(peripherals);
+    let spi = Spi::new(
+        peripherals.SPI2,
+        esp_hal::spi::master::Config::default()
+            .with_frequency(Rate::from_mhz(40))
+            .with_mode(Mode::_0),
+    )
+        .unwrap()
+        .with_sck(peripherals.GPIO7)
+        .with_mosi(peripherals.GPIO6)
+        // .with_cs((peripherals.GPIO5))
+    ;
+        // .with_dma((peripherals.DMA_CH0));
+    // let mut spi = Spi::new(
+    //     peripherals.SPI2,
+    //     esp_hal::spi::master::Config::default()
+    //         .with_frequency(100.kHz())
+    //         .with_mode(Mode::_0),
+    // )
+    //     .unwrap()
+    //     .with_sck(sclk)
+    //     .with_miso(miso)
+    //     .with_mosi(mosi)
+    //     .with_cs(cs)
+    //     .with_dma(peripherals.DMA_CH0);
+
+    // let di = lcd_display_interface!(peripherals, spi);
+    // let lcd_dc = Output::new($dc_pin, Level::Low);
+    let mut buffer = [0_u8; 512];
+
+    let lcd_dc = Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default());
+    // Define the display interface with no chip select
+    let cs_output = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
+    let spi_device = ExclusiveDevice::new_no_delay(spi, cs_output).unwrap();
+    let di = SpiInterface::new(spi_device, lcd_dc, &mut buffer);
+
+    // let di = display_interface_spi_dma::new_no_cs(crate::LCD_MEMORY_SIZE, spi, lcd_dc);
+    // let di = SpiInterface::new(spi_device, dc, &mut buffer);
+// }
     let mut delay = Delay::new();
     delay.delay_ns(500_000u32);
 
-    let mut display = lcd_display!(peripherals, di).init(&mut delay).unwrap();
+    // let mut display = lcd_display!(peripherals, di).init(&mut delay).unwrap();
+    // let mut display =     mipidsi::Builder::new(mipidsi::models::ILI9342CRgb565, di)
+    //     .display_size((320 as u16), (240 as u16))
+    //     .orientation((mipidsi::options::Orientation::new()
+    //         .flip_vertical()
+    //         .flip_horizontal()
+    //     ))
+    //     .color_order(mipidsi::options::ColorOrder::Bgr)
+    //     .reset_pin(OutputOpenDrain::new(peripherals.GPIO48, Level::High, Pull::Up)
+    //     );
+
+    let reset = Output::new(peripherals.GPIO48, Level::High, OutputConfig::default().with_drive_mode(DriveMode::OpenDrain));
+
+    let mut display = Builder::new(ILI9486Rgb565, di)
+        .reset_pin(reset)
+        .init(&mut delay)
+        .unwrap();
 
     // Use the `lcd_backlight_init` macro to turn on the backlight
-    lcd_backlight_init!(peripherals);
+    let mut backlight = Output::new(peripherals.GPIO47, Level::High, OutputConfig::default());
+    backlight.set_high();
+    // lcd_backlight_init!(peripherals);
 
     info!("Hello Conway!");
 
@@ -181,15 +237,17 @@ fn main() -> ! {
     }
     let mut generation_count = 0;
 
-    let mut data = [Rgb565::BLACK; 320 * 240];
-    let mut fbuf = FrameBuf::new(&mut data, 320, 240);
+    // let mut data = [Rgb565::BLACK; 320 * 240];
+    // let mut fbuf = FrameBuf::new(&mut data, 320, 240);
+    display.clear(Rgb565::BLACK).unwrap();
 
     loop {
         // Update the game state
         update_game_of_life(&mut grid);
 
         // Draw the updated grid on the display
-        draw_grid(&mut fbuf, &grid).unwrap();
+        // draw_grid(&mut fbuf, &grid).unwrap();
+        draw_grid(&mut display, &grid).unwrap();
 
         generation_count += 1;
 
@@ -198,10 +256,18 @@ fn main() -> ! {
             generation_count = 0; // Reset the generation counter
         }
 
-        write_generation(&mut fbuf, generation_count).unwrap();
+        // write_generation(&mut fbuf, generation_count).unwrap();
+        write_generation(&mut display, generation_count).unwrap();
 
-        let pixel_iterator = fbuf.into_iter().map(|p| p.1);
-        let _ = display.set_pixels(0, 0, 319, 240, pixel_iterator);
+        // let pixel_iterator = fbuf.into_iter().map(|p| p.1);
+        // // let _ = display.set_pixels(0, 0, 319, 240, pixel_iterator);
+        // use mipidsi::interface::InterfacePixelFormat;
+
+        // let pixel_iterator = fbuf.into_iter().map(|p| p.1);
+
+        // // Send the pixels to the display
+        // Rgb565::send_pixels(&mut display, pixel_iterator).unwrap();
+
 
         // Add a delay to control the simulation speed
         delay.delay_ms(100u32);
