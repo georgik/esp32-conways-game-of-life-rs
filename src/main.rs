@@ -16,7 +16,7 @@ use embedded_graphics::{
 };
 use esp_hal::delay::Delay;
 use esp_hal::{
-    gpio::{DriveMode, Level, Output, OutputConfig},
+    gpio::{Level, Output, OutputConfig},
     rng::Rng,
     spi::master::Spi,
     Blocking,
@@ -227,7 +227,7 @@ fn main() -> ! {
     // Initialize the display using mipidsi's builder.
     let mut display: MyDisplay = Builder::new(ST7789, di)
         .reset_pin(reset)
-        .display_size(172, 320)
+        .display_size(206, 320)
         .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)
         .unwrap();
