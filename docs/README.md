@@ -15,6 +15,7 @@ Implementation of Conway's Game of Life Rust Bare Metal.
 The implementation is based on Rust no\_std, using mipidsi crate.
 
 ```
+cd esp32-s3-box-3
 cargo run --release
 ```
 
@@ -25,6 +26,7 @@ cargo run --release
 The implementation is based on Rust no\_std and Bevy 0.15 no\_std, plus mipidsi crate
 
 ```
+cd esp32-c6-waveshare-1_47
 cargo run --release
 ```
 
