@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+use alloc::boxed::Box;
+use embedded_hal_bus::spi::NoDelay; // no longer used in our type alias
 use core::fmt::Write;
 use embedded_hal::delay::DelayNs;
 use embedded_graphics::{
@@ -16,25 +19,45 @@ use esp_hal::{
     gpio::{DriveMode, Level, Output, OutputConfig},
     rng::Rng,
     spi::master::Spi,
+    Blocking,
     main,
     time::Rate,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
-use esp_println::logger::init_logger_from_env;
+use esp_println::{logger::init_logger_from_env, println};
 use log::info;
 use mipidsi::interface::SpiInterface;
 use mipidsi::{models::ILI9486Rgb565, Builder};
 // Bevy ECS (no_std) imports:
 use bevy_ecs::prelude::*;
 
+// --- Type Alias for the Concrete Display ---
+// Now we specify that the SPI interface uses Delay (not NoDelay).
+type MyDisplay = mipidsi::Display<
+    SpiInterface<
+        'static,
+        ExclusiveDevice<Spi<'static, Blocking>, Output<'static>, Delay>,
+        Output<'static>
+    >,
+    ILI9486Rgb565,
+    Output<'static>
+>;
+
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    println!("Panic: {}", _info);
+    loop {}
+}
+
+#[allow(unused_imports)]
+use esp_alloc::EspHeap;
+
 // --- Game of Life Definitions ---
 
-// Grid dimensions and generation reset threshold.
 const WIDTH: usize = 64;
 const HEIGHT: usize = 48;
 const RESET_AFTER_GENERATIONS: usize = 500;
 
-// Randomize the grid using the provided RNG.
 fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
@@ -45,7 +68,6 @@ fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
     }
 }
 
-// Standard Conway’s Game of Life update.
 fn update_game_of_life(grid: &mut [[bool; WIDTH]; HEIGHT]) {
     let mut new_grid = [[false; WIDTH]; HEIGHT];
     for y in 0..HEIGHT {
@@ -75,7 +97,6 @@ fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; WIDTH]; HEIGHT]) -> 
     count
 }
 
-// Draw the grid to the display.
 fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     grid: &[[bool; WIDTH]; HEIGHT],
@@ -84,7 +105,6 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     for (y, row) in grid.iter().enumerate() {
         for (x, &cell) in row.iter().enumerate() {
             if cell {
-                // Live cell: draw a border and an inner white cell.
                 let cell_size = Size::new(5, 5);
                 let border_size = Size::new(7, 7);
                 Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), border_size)
@@ -94,7 +114,6 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
                     .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
                     .draw(display)?;
             } else {
-                // Dead cell: fill with black.
                 Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), Size::new(7, 7))
                     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
                     .draw(display)?;
@@ -104,7 +123,6 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     Ok(())
 }
 
-// Write the generation number to the display.
 fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     generation: usize,
@@ -122,22 +140,30 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
 
 // --- ECS Resources and Systems ---
 
-// Resource holding the Game of Life state.
-#[derive(Default)]
+#[derive(Resource)]
 struct GameOfLifeResource {
     grid: [[bool; WIDTH]; HEIGHT],
     generation: usize,
 }
 
-// Resource wrapping the RNG.
-struct RngResource(Rng);
-
-// Resource for the display. The type parameter D must implement DrawTarget<Color = Rgb565>.
-struct DisplayResource<D: DrawTarget<Color = Rgb565>> {
-    display: D,
+impl Default for GameOfLifeResource {
+    fn default() -> Self {
+        Self {
+            grid: [[false; WIDTH]; HEIGHT],
+            generation: 0,
+        }
+    }
 }
 
-// System to update the Game of Life state.
+#[derive(Resource)]
+struct RngResource(Rng);
+
+// Use the concrete display type in our resource.
+#[derive(Resource)]
+struct DisplayResource {
+    display: MyDisplay,
+}
+
 fn update_game_of_life_system(
     mut game: ResMut<GameOfLifeResource>,
     mut rng_res: ResMut<RngResource>,
@@ -150,16 +176,9 @@ fn update_game_of_life_system(
     }
 }
 
-// System to render the current game state to the display.
-fn render_system<D: DrawTarget<Color = Rgb565>>(
-    mut display_res: ResMut<DisplayResource<D>>,
-    game: Res<GameOfLifeResource>,
-) {
-    // Clear the display.
+fn render_system(mut display_res: ResMut<DisplayResource>, game: Res<GameOfLifeResource>) {
     display_res.display.clear(Rgb565::BLACK).unwrap();
-    // Draw the grid.
     draw_grid(&mut display_res.display, &game.grid).unwrap();
-    // Write the generation number.
     write_generation(&mut display_res.display, game.generation).unwrap();
 }
 
@@ -167,13 +186,13 @@ fn render_system<D: DrawTarget<Color = Rgb565>>(
 
 #[main]
 fn main() -> ! {
-    // Initialize peripherals and logger.
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    esp_alloc::heap_allocator!(size: 72 * 1024);
     init_logger_from_env();
 
-    // --- Display Setup ---
-    // Set up SPI for the display.
-    let spi = Spi::new(
+    // --- Display Setup using BSP values ---
+    // SPI: SCK = GPIO7, MOSI = GPIO6, CS = GPIO14.
+    let spi = Spi::<Blocking>::new(
         peripherals.SPI2,
         esp_hal::spi::master::Config::default()
             .with_frequency(Rate::from_mhz(40))
@@ -182,63 +201,62 @@ fn main() -> ! {
     .unwrap()
     .with_sck(peripherals.GPIO7)
     .with_mosi(peripherals.GPIO6);
-    // Chip select output.
-    let cs_output = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
-    let spi_device = ExclusiveDevice::new_no_delay(spi, cs_output).unwrap();
-    let lcd_dc = Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default());
-    let mut buffer = [0_u8; 512];
-    let di = SpiInterface::new(spi_device, lcd_dc, &mut buffer);
+    let cs_output = Output::new(peripherals.GPIO14, Level::High, OutputConfig::default());
+    // Create a proper SPI device with a Delay instance.
+    let spi_delay = Delay::new();
+    let spi_device = ExclusiveDevice::new(spi, cs_output, spi_delay).unwrap();
 
-    let mut delay = Delay::new();
-    delay.delay_ns(500_000u32);
+    // LCD interface: DC = GPIO15.
+    let lcd_dc = Output::new(peripherals.GPIO15, Level::Low, OutputConfig::default());
+    // Leak a Box to obtain a 'static mutable buffer.
+    let buffer: &'static mut [u8; 512] = Box::leak(Box::new([0_u8; 512]));
+    let di = SpiInterface::new(spi_device, lcd_dc, buffer);
 
-    // Reset pin for the display.
+    // Create a separate Delay for display initialization.
+    let mut display_delay = Delay::new();
+    display_delay.delay_ns(500_000u32);
+
+    // Reset pin: GPIO21.
     let reset = Output::new(
-        peripherals.GPIO48,
+        peripherals.GPIO21,
         Level::High,
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
     // Initialize the display using mipidsi's builder.
-    let display = Builder::new(ILI9486Rgb565, di)
+    let display: MyDisplay = Builder::new(ILI9486Rgb565, di)
         .reset_pin(reset)
-        .init(&mut delay)
+        .init(&mut display_delay)
         .unwrap();
 
-    // Turn on the backlight.
-    let mut backlight =
-        Output::new(peripherals.GPIO47, Level::High, OutputConfig::default());
+    // Backlight on GPIO22.
+    let mut backlight = Output::new(peripherals.GPIO22, Level::High, OutputConfig::default());
     backlight.set_high();
 
     info!("Hello Conway with Bevy ECS!");
 
     // --- Initialize Game Resources ---
-    // Create the game state resource.
     let mut game = GameOfLifeResource::default();
-    {
-        // Use RNG to randomize the grid.
-        let mut rng = Rng::new(peripherals.RNG);
-        randomize_grid(&mut rng, &mut game.grid);
-        // Optionally, add a glider pattern.
-        let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
-        for (x, y) in glider.iter() {
-            game.grid[*y][*x] = true;
-        }
+    let mut rng_instance = Rng::new(peripherals.RNG);
+    randomize_grid(&mut rng_instance, &mut game.grid);
+    let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
+    for (x, y) in glider.iter() {
+        game.grid[*y][*x] = true;
     }
 
-    // Build the ECS world and insert resources.
     let mut world = World::default();
     world.insert_resource(game);
-    world.insert_resource(RngResource(Rng::new(peripherals.RNG)));
+    world.insert_resource(RngResource(rng_instance));
     world.insert_resource(DisplayResource { display });
 
-    // Create a schedule and add our systems.
     let mut schedule = Schedule::default();
     schedule.add_systems(update_game_of_life_system);
-    schedule.add_systems(render_system::<_>);
+    schedule.add_systems(render_system);
 
-    // Main loop: run the ECS schedule and delay.
+    // Create a separate Delay for game-loop timing.
+    let mut loop_delay = Delay::new();
+
     loop {
         schedule.run(&mut world);
-        delay.delay_ms(100u32);
+        loop_delay.delay_ms(100u32);
     }
 }
