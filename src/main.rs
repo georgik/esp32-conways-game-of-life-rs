@@ -3,7 +3,7 @@
 
 extern crate alloc;
 use alloc::boxed::Box;
-use embedded_hal_bus::spi::NoDelay; // no longer used in our type alias
+
 use core::fmt::Write;
 use embedded_hal::delay::DelayNs;
 use embedded_graphics::{
@@ -26,20 +26,21 @@ use esp_hal::{
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::interface::SpiInterface;
-use mipidsi::{models::ILI9486Rgb565, Builder};
+use mipidsi::{interface::SpiInterface, options::ColorInversion};
+
+use mipidsi::{models::ST7789, Builder};
 // Bevy ECS (no_std) imports:
 use bevy_ecs::prelude::*;
 
 // --- Type Alias for the Concrete Display ---
-// Now we specify that the SPI interface uses Delay (not NoDelay).
+// Now we specify that the SPI interface uses Delay.
 type MyDisplay = mipidsi::Display<
     SpiInterface<
         'static,
         ExclusiveDevice<Spi<'static, Blocking>, Output<'static>, Delay>,
         Output<'static>
     >,
-    ILI9486Rgb565,
+    ST7789,
     Output<'static>
 >;
 
@@ -102,6 +103,7 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     grid: &[[bool; WIDTH]; HEIGHT],
 ) -> Result<(), D::Error> {
     let border_color = Rgb565::new(230, 230, 230);
+
     for (y, row) in grid.iter().enumerate() {
         for (x, &cell) in row.iter().enumerate() {
             if cell {
@@ -216,23 +218,27 @@ fn main() -> ! {
     let mut display_delay = Delay::new();
     display_delay.delay_ns(500_000u32);
 
-    // Reset pin: GPIO21.
+    // Reset pin: GPIO21. Per BSP, reset is active low.
     let reset = Output::new(
         peripherals.GPIO21,
-        Level::High,
-        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
+        Level::Low,  // match BSP: lcd_reset_pin! creates with Level::Low.
+        OutputConfig::default(),
     );
     // Initialize the display using mipidsi's builder.
-    let display: MyDisplay = Builder::new(ILI9486Rgb565, di)
+    let mut display: MyDisplay = Builder::new(ST7789, di)
         .reset_pin(reset)
+        .display_size(172, 320)
+        .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)
         .unwrap();
 
-    // Backlight on GPIO22.
-    let mut backlight = Output::new(peripherals.GPIO22, Level::High, OutputConfig::default());
+    display.clear(Rgb565::BLUE).unwrap();
+
+    // Backlight on GPIO22: create pin with initial low then set high.
+    let mut backlight = Output::new(peripherals.GPIO22, Level::Low, OutputConfig::default());
     backlight.set_high();
 
-    info!("Hello Conway with Bevy ECS!");
+    info!("Display initialized");
 
     // --- Initialize Game Resources ---
     let mut game = GameOfLifeResource::default();
