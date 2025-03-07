@@ -226,11 +226,11 @@ fn render_system(
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    esp_alloc::heap_allocator!(size: 140 * 1024);
+    esp_alloc::heap_allocator!(size: 150 * 1024);
     init_logger_from_env();
 
     // --- DMA Buffers for SPI ---
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(8912);
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
@@ -297,8 +297,11 @@ fn main() -> ! {
     let mut world = World::default();
     world.insert_resource(game);
     world.insert_resource(RngResource(rng_instance));
-    world.insert_non_send_resource(fb_res);
+    // The DisplayResource is non‑send because of DMA pointers, so keep that as non‑send.
     world.insert_non_send_resource(DisplayResource { display });
+    // Insert the framebuffer resource as a normal resource.
+    world.insert_resource(fb_res);
+
 
     let mut schedule = Schedule::default();
     schedule.add_systems(update_game_of_life_system);
@@ -308,6 +311,6 @@ fn main() -> ! {
 
     loop {
         schedule.run(&mut world);
-        loop_delay.delay_ms(100u32);
+        loop_delay.delay_ms(50u32);
     }
 }
