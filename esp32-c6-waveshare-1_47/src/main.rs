@@ -14,33 +14,24 @@ use embedded_graphics::{
     text::Text,
     Drawable,
 };
+use embedded_graphics_framebuf::FrameBuf;
 use esp_hal::delay::Delay;
 use esp_hal::{
     gpio::{Level, Output, OutputConfig},
     rng::Rng,
-    spi::master::Spi,
+    spi::master::{Spi, SpiDmaBus},
     Blocking,
     main,
     time::Rate,
 };
+use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
+use esp_hal::dma_buffers;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
 use mipidsi::{interface::SpiInterface, options::ColorInversion};
-
 use mipidsi::{models::ST7789, Builder};
-use bevy_ecs::prelude::*;
-
-// --- Type Alias for the Concrete Display ---
-type MyDisplay = mipidsi::Display<
-    SpiInterface<
-        'static,
-        ExclusiveDevice<Spi<'static, Blocking>, Output<'static>, Delay>,
-        Output<'static>
-    >,
-    ST7789,
-    Output<'static>
->;
+use bevy_ecs::prelude::*; // includes NonSend and NonSendMut
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -48,16 +39,50 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-#[allow(unused_imports)]
-use esp_alloc::EspHeap;
+// --- Type Alias for the Concrete Display ---
+// Use the DMA-enabled SPI bus type.
+type MyDisplay = mipidsi::Display<
+    SpiInterface<
+        'static,
+        ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
+        Output<'static>
+    >,
+    ST7789,
+    Output<'static>
+>;
+
+// --- LCD Resolution and FrameBuffer Type Aliases ---
+const LCD_H_RES: usize = 206;
+const LCD_V_RES: usize = 320;
+const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
+
+// We want our pixels stored as Rgb565.
+type FbBuffer = [Rgb565; LCD_BUFFER_SIZE];
+
+// Define a type alias for the complete FrameBuf:
+// First parameter: Pixel color type, second: Owned backend.
+type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
+
+#[derive(Resource)]
+struct FrameBufferResource {
+    frame_buf: MyFrameBuf,
+}
+
+impl FrameBufferResource {
+    fn new() -> Self {
+        // Allocate the framebuffer data as an owned array of Rgb565.
+        let fb_data: FbBuffer = *Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
+        let frame_buf = MyFrameBuf::new(fb_data, LCD_H_RES, LCD_V_RES);
+        Self { frame_buf }
+    }
+}
 
 // --- Game of Life Definitions ---
-
-const WIDTH: usize = 64;
-const HEIGHT: usize = 48;
+const GRID_WIDTH: usize = 64;
+const GRID_HEIGHT: usize = 48;
 const RESET_AFTER_GENERATIONS: usize = 500;
 
-fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
+fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; GRID_WIDTH]; GRID_HEIGHT]) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
             let mut buf = [0u8; 1];
@@ -67,10 +92,10 @@ fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; WIDTH]; HEIGHT]) {
     }
 }
 
-fn update_game_of_life(grid: &mut [[bool; WIDTH]; HEIGHT]) {
-    let mut new_grid = [[false; WIDTH]; HEIGHT];
-    for y in 0..HEIGHT {
-        for x in 0..WIDTH {
+fn update_game_of_life(grid: &mut [[bool; GRID_WIDTH]; GRID_HEIGHT]) {
+    let mut new_grid = [[false; GRID_WIDTH]; GRID_HEIGHT];
+    for y in 0..GRID_HEIGHT {
+        for x in 0..GRID_WIDTH {
             let alive_neighbors = count_alive_neighbors(x, y, grid);
             new_grid[y][x] = matches!(
                 (grid[y][x], alive_neighbors),
@@ -81,14 +106,14 @@ fn update_game_of_life(grid: &mut [[bool; WIDTH]; HEIGHT]) {
     *grid = new_grid;
 }
 
-fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; WIDTH]; HEIGHT]) -> u8 {
+fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; GRID_WIDTH]; GRID_HEIGHT]) -> u8 {
     let mut count = 0;
     for i in 0..3 {
         for j in 0..3 {
             if i == 1 && j == 1 { continue; }
-            let neighbor_x = (x + i + WIDTH - 1) % WIDTH;
-            let neighbor_y = (y + j + HEIGHT - 1) % HEIGHT;
-            if grid[neighbor_y][neighbor_x] {
+            let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
+            let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
+            if grid[ny][nx] {
                 count += 1;
             }
         }
@@ -98,10 +123,9 @@ fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; WIDTH]; HEIGHT]) -> 
 
 fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
-    grid: &[[bool; WIDTH]; HEIGHT],
+    grid: &[[bool; GRID_WIDTH]; GRID_HEIGHT],
 ) -> Result<(), D::Error> {
     let border_color = Rgb565::new(230, 230, 230);
-
     for (y, row) in grid.iter().enumerate() {
         for (x, &cell) in row.iter().enumerate() {
             if cell {
@@ -142,14 +166,14 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
 
 #[derive(Resource)]
 struct GameOfLifeResource {
-    grid: [[bool; WIDTH]; HEIGHT],
+    grid: [[bool; GRID_WIDTH]; GRID_HEIGHT],
     generation: usize,
 }
 
 impl Default for GameOfLifeResource {
     fn default() -> Self {
         Self {
-            grid: [[false; WIDTH]; HEIGHT],
+            grid: [[false; GRID_WIDTH]; GRID_HEIGHT],
             generation: 0,
         }
     }
@@ -158,8 +182,8 @@ impl Default for GameOfLifeResource {
 #[derive(Resource)]
 struct RngResource(Rng);
 
-// Use the concrete display type in our resource.
-#[derive(Resource)]
+// Because our display type contains DMA descriptors and raw pointers, it isn’t Sync.
+// We wrap it in a NonSend resource so that Bevy doesn’t require Sync.
 struct DisplayResource {
     display: MyDisplay,
 }
@@ -176,19 +200,39 @@ fn update_game_of_life_system(
     }
 }
 
-fn render_system(mut display_res: ResMut<DisplayResource>, game: Res<GameOfLifeResource>) {
-    display_res.display.clear(Rgb565::BLACK).unwrap();
-    draw_grid(&mut display_res.display, &game.grid).unwrap();
-    write_generation(&mut display_res.display, game.generation).unwrap();
-}
+/// Render the game state by drawing into the offscreen framebuffer and then flushing
+/// it to the display via DMA. Instead of converting to a byte slice, we simply iterate
+/// over the owned framebuffer.
+fn render_system(
+    mut display_res: NonSendMut<DisplayResource>,
+    game: Res<GameOfLifeResource>,
+    mut fb_res: ResMut<FrameBufferResource>,
+) {
+    // Clear the framebuffer.
+    fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
+    // Draw the game grid and generation into the framebuffer.
+    draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
+    write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
 
-// --- Main Function ---
+    // Define the area covering the entire framebuffer.
+    let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
+    // Since our backend is an owned array of Rgb565, we can simply iterate over it.
+    display_res
+        .display
+        .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
+        .unwrap();
+}
 
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    esp_alloc::heap_allocator!(size: 72 * 1024);
+    esp_alloc::heap_allocator!(size: 140 * 1024);
     init_logger_from_env();
+
+    // --- DMA Buffers for SPI ---
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(32000);
+    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
+    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
     // --- Display Setup using BSP values ---
     // SPI: SCK = GPIO7, MOSI = GPIO6, CS = GPIO14.
@@ -200,9 +244,10 @@ fn main() -> ! {
     )
     .unwrap()
     .with_sck(peripherals.GPIO7)
-    .with_mosi(peripherals.GPIO6);
+    .with_mosi(peripherals.GPIO6)
+    .with_dma(peripherals.DMA_CH0)
+    .with_buffers(dma_rx_buf, dma_tx_buf);
     let cs_output = Output::new(peripherals.GPIO14, Level::High, OutputConfig::default());
-    // Create a proper SPI device with a Delay instance.
     let spi_delay = Delay::new();
     let spi_device = ExclusiveDevice::new(spi, cs_output, spi_delay).unwrap();
 
@@ -212,14 +257,13 @@ fn main() -> ! {
     let buffer: &'static mut [u8; 512] = Box::leak(Box::new([0_u8; 512]));
     let di = SpiInterface::new(spi_device, lcd_dc, buffer);
 
-    // Create a separate Delay for display initialization.
     let mut display_delay = Delay::new();
     display_delay.delay_ns(500_000u32);
 
-    // Reset pin: GPIO21. Per BSP, reset is active low.
+    // Reset pin: GPIO21 (active low per BSP).
     let reset = Output::new(
         peripherals.GPIO21,
-        Level::Low,  // match BSP: lcd_reset_pin! creates with Level::Low.
+        Level::Low,
         OutputConfig::default(),
     );
     // Initialize the display using mipidsi's builder.
@@ -232,7 +276,7 @@ fn main() -> ! {
 
     display.clear(Rgb565::BLUE).unwrap();
 
-    // Backlight on GPIO22: create pin with initial low then set high.
+    // Backlight on GPIO22.
     let mut backlight = Output::new(peripherals.GPIO22, Level::Low, OutputConfig::default());
     backlight.set_high();
 
@@ -247,16 +291,19 @@ fn main() -> ! {
         game.grid[*y][*x] = true;
     }
 
+    // Create the framebuffer resource.
+    let fb_res = FrameBufferResource::new();
+
     let mut world = World::default();
     world.insert_resource(game);
     world.insert_resource(RngResource(rng_instance));
-    world.insert_resource(DisplayResource { display });
+    world.insert_non_send_resource(fb_res);
+    world.insert_non_send_resource(DisplayResource { display });
 
     let mut schedule = Schedule::default();
     schedule.add_systems(update_game_of_life_system);
     schedule.add_systems(render_system);
 
-    // Create a separate Delay for game-loop timing.
     let mut loop_delay = Delay::new();
 
     loop {
