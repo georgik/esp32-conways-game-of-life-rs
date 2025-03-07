@@ -39,7 +39,6 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
-// --- Type Alias for the Concrete Display ---
 // Use the DMA-enabled SPI bus type.
 type MyDisplay = mipidsi::Display<
     SpiInterface<
@@ -51,33 +50,36 @@ type MyDisplay = mipidsi::Display<
     Output<'static>
 >;
 
-// --- LCD Resolution and FrameBuffer Type Aliases ---
+// Physical display resolution.
 const LCD_H_RES: usize = 206;
 const LCD_V_RES: usize = 320;
-const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
-// We want our pixels stored as Rgb565.
-type FbBuffer = [Rgb565; LCD_BUFFER_SIZE];
+// -----------------------------------------------------------------------------
+// Line Buffer (Partial Update) Definitions
+// -----------------------------------------------------------------------------
 
-// Define a type alias for the complete FrameBuf:
-// First parameter: Pixel color type, second: Owned backend.
-type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
+// We choose a chunk height (number of lines) for partial updates.
+const LINE_BUFFER_LINES: usize = 10;
+const LINE_BUFFER_SIZE: usize = LCD_H_RES * LINE_BUFFER_LINES;
 
+// This resource holds a line buffer used to update a few lines at a time.
 #[derive(Resource)]
-struct FrameBufferResource {
-    frame_buf: MyFrameBuf,
+struct LineBufferResource {
+    buffer: [Rgb565; LINE_BUFFER_SIZE],
 }
 
-impl FrameBufferResource {
+impl LineBufferResource {
     fn new() -> Self {
-        // Allocate the framebuffer data as an owned array of Rgb565.
-        let fb_data: FbBuffer = *Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
-        let frame_buf = MyFrameBuf::new(fb_data, LCD_H_RES, LCD_V_RES);
-        Self { frame_buf }
+        Self {
+            buffer: [Rgb565::BLACK; LINE_BUFFER_SIZE],
+        }
     }
 }
 
-// --- Game of Life Definitions ---
+// -----------------------------------------------------------------------------
+// Game of Life Definitions (unchanged)
+// -----------------------------------------------------------------------------
+
 const GRID_WIDTH: usize = 64;
 const GRID_HEIGHT: usize = 48;
 const RESET_AFTER_GENERATIONS: usize = 500;
@@ -121,24 +123,41 @@ fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; GRID_WIDTH]; GRID_HE
     count
 }
 
-fn draw_grid<D: DrawTarget<Color = Rgb565>>(
+// -----------------------------------------------------------------------------
+// Drawing Functions for Partial Update
+// -----------------------------------------------------------------------------
+
+/// Draw the grid cells that fall within the current vertical chunk.
+/// `y_offset` is the starting y coordinate (in pixels) of the chunk.
+/// `chunk_height` is the number of lines in the chunk.
+fn draw_grid_partial<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     grid: &[[bool; GRID_WIDTH]; GRID_HEIGHT],
+    y_offset: usize,
+    chunk_height: usize,
 ) -> Result<(), D::Error> {
     let border_color = Rgb565::new(230, 230, 230);
-    for (y, row) in grid.iter().enumerate() {
-        for (x, &cell) in row.iter().enumerate() {
+    // Our cells are drawn at multiples of 7 pixels.
+    for (gy, row) in grid.iter().enumerate() {
+        let cell_y = gy * 7;
+        let cell_bottom = cell_y + 7;
+        // Skip cells that are entirely above or below the chunk.
+        if cell_bottom <= y_offset || cell_y >= y_offset + chunk_height {
+            continue;
+        }
+        for (gx, &cell) in row.iter().enumerate() {
+            let cell_x = gx * 7;
+            // Draw the cell relative to the chunk (subtract y_offset).
+            let draw_point = Point::new(cell_x as i32, cell_y as i32 - y_offset as i32);
             if cell {
-                let cell_size = Size::new(5, 5);
-                let border_size = Size::new(7, 7);
-                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), border_size)
+                Rectangle::new(draw_point, Size::new(7, 7))
                     .into_styled(PrimitiveStyle::with_fill(border_color))
                     .draw(display)?;
-                Rectangle::new(Point::new(x as i32 * 7 + 1, y as i32 * 7 + 1), cell_size)
+                Rectangle::new(draw_point + Point::new(1, 1), Size::new(5, 5))
                     .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
                     .draw(display)?;
             } else {
-                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), Size::new(7, 7))
+                Rectangle::new(draw_point, Size::new(7, 7))
                     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
                     .draw(display)?;
             }
@@ -147,22 +166,28 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     Ok(())
 }
 
-fn write_generation<D: DrawTarget<Color = Rgb565>>(
+/// Draw the generation text only in the top chunk.
+fn write_generation_partial<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     generation: usize,
+    y_offset: usize,
 ) -> Result<(), D::Error> {
-    let mut num_str = heapless::String::<20>::new();
-    write!(num_str, "{}", generation).unwrap();
-    Text::new(
-        num_str.as_str(),
-        Point::new(8, 13),
-        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-    )
-    .draw(display)?;
+    if y_offset == 0 {
+        let mut num_str = heapless::String::<20>::new();
+        write!(num_str, "{}", generation).unwrap();
+        Text::new(
+            num_str.as_str(),
+            Point::new(8, 13),
+            MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+        )
+        .draw(display)?;
+    }
     Ok(())
 }
 
-// --- ECS Resources and Systems ---
+// -----------------------------------------------------------------------------
+// ECS Resources and Systems (unchanged except for using NonSend for Display)
+// -----------------------------------------------------------------------------
 
 #[derive(Resource)]
 struct GameOfLifeResource {
@@ -182,8 +207,8 @@ impl Default for GameOfLifeResource {
 #[derive(Resource)]
 struct RngResource(Rng);
 
-// Because our display type contains DMA descriptors and raw pointers, it isn’t Sync.
-// We wrap it in a NonSend resource so that Bevy doesn’t require Sync.
+// We cannot mark MyDisplay as Sync because it contains raw pointers from DMA,
+// so we wrap it as a NonSend resource.
 struct DisplayResource {
     display: MyDisplay,
 }
@@ -200,32 +225,50 @@ fn update_game_of_life_system(
     }
 }
 
-/// Render the game state by drawing into the offscreen framebuffer and then flushing
-/// it to the display via DMA. Instead of converting to a byte slice, we simply iterate
-/// over the owned framebuffer.
+/// Render system: update the display in partial (line buffer) mode.
 fn render_system(
     mut display_res: NonSendMut<DisplayResource>,
     game: Res<GameOfLifeResource>,
-    mut fb_res: ResMut<FrameBufferResource>,
+    mut lb_res: ResMut<LineBufferResource>,
 ) {
-    // Clear the framebuffer.
-    fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
-    // Draw the game grid and generation into the framebuffer.
-    draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
-    write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
+    // For each chunk of LINE_BUFFER_LINES pixels in the vertical direction:
+    for y_offset in (0..LCD_V_RES).step_by(LINE_BUFFER_LINES) {
+        // Determine the height of this chunk (it may be smaller at the bottom)
+        let chunk_height = if y_offset + LINE_BUFFER_LINES > LCD_V_RES {
+            LCD_V_RES - y_offset
+        } else {
+            LINE_BUFFER_LINES
+        };
 
-    // Define the area covering the entire framebuffer.
-    let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
-    // Since our backend is an owned array of Rgb565, we can simply iterate over it.
-    display_res
-        .display
-        .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
-        .unwrap();
+        // Create a temporary FrameBuf over our line buffer.
+        // Our line buffer (lb_res.buffer) is used as the backend.
+        let mut chunk_fbuf = FrameBuf::new(&mut lb_res.buffer, LCD_H_RES, chunk_height);
+
+        // Clear the chunk.
+        chunk_fbuf.clear(Rgb565::BLACK).unwrap();
+        // Draw the portion of the game grid that intersects this chunk.
+        draw_grid_partial(&mut chunk_fbuf, &game.grid, y_offset, chunk_height).unwrap();
+        // Write generation text if applicable.
+        write_generation_partial(&mut chunk_fbuf, game.generation, y_offset).unwrap();
+
+        // Define the area on the physical display corresponding to this chunk.
+        let area = Rectangle::new(Point::new(0, y_offset as i32), Size::new(LCD_H_RES as u32, chunk_height as u32));
+        // Flush this chunk to the display.
+        display_res
+            .display
+            .fill_contiguous(&area, chunk_fbuf.data.iter().copied())
+            .unwrap();
+    }
 }
+
+// -----------------------------------------------------------------------------
+// Main Function
+// -----------------------------------------------------------------------------
 
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    // With a reduced line buffer, adjust heap size if necessary.
     esp_alloc::heap_allocator!(size: 140 * 1024);
     init_logger_from_env();
 
@@ -253,7 +296,7 @@ fn main() -> ! {
 
     // LCD interface: DC = GPIO15.
     let lcd_dc = Output::new(peripherals.GPIO15, Level::Low, OutputConfig::default());
-    // Leak a Box to obtain a 'static mutable buffer.
+    // Leak a Box to obtain a 'static mutable buffer for SPI transfers.
     let buffer: &'static mut [u8; 512] = Box::leak(Box::new([0_u8; 512]));
     let di = SpiInterface::new(spi_device, lcd_dc, buffer);
 
@@ -291,21 +334,21 @@ fn main() -> ! {
         game.grid[*y][*x] = true;
     }
 
-    // Create the framebuffer resource.
-    let fb_res = FrameBufferResource::new();
+    // Create the line buffer resource.
+    let lb_res = LineBufferResource::new();
 
     let mut world = World::default();
     world.insert_resource(game);
     world.insert_resource(RngResource(rng_instance));
-    world.insert_non_send_resource(fb_res);
+    // Insert the display as a non-send resource because its DMA descriptors aren’t Sync.
     world.insert_non_send_resource(DisplayResource { display });
+    world.insert_resource(lb_res);
 
     let mut schedule = Schedule::default();
     schedule.add_systems(update_game_of_life_system);
     schedule.add_systems(render_system);
 
     let mut loop_delay = Delay::new();
-
     loop {
         schedule.run(&mut world);
         loop_delay.delay_ms(100u32);
