@@ -58,9 +58,7 @@ const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
 // We want our pixels stored as Rgb565.
 type FbBuffer = [Rgb565; LCD_BUFFER_SIZE];
-
-// Define a type alias for the complete FrameBuf:
-// First parameter: Pixel color type, second: Owned backend.
+// Define a type alias for the complete FrameBuf.
 type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
 
 #[derive(Resource)]
@@ -78,67 +76,94 @@ impl FrameBufferResource {
 }
 
 // --- Game of Life Definitions ---
+// Now each cell is a u8 (0 means dead; >0 indicates age)
 const GRID_WIDTH: usize = 64;
 const GRID_HEIGHT: usize = 48;
 const RESET_AFTER_GENERATIONS: usize = 500;
 
-fn randomize_grid(rng: &mut Rng, grid: &mut [[bool; GRID_WIDTH]; GRID_HEIGHT]) {
+fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
             let mut buf = [0u8; 1];
             rng.read(&mut buf);
-            *cell = buf[0] & 1 != 0;
+            // Randomly set cell to 1 (alive) or 0 (dead)
+            *cell = if buf[0] & 1 != 0 { 1 } else { 0 };
         }
     }
 }
 
-fn update_game_of_life(grid: &mut [[bool; GRID_WIDTH]; GRID_HEIGHT]) {
-    let mut new_grid = [[false; GRID_WIDTH]; GRID_HEIGHT];
+fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
+    let mut new_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
     for y in 0..GRID_HEIGHT {
         for x in 0..GRID_WIDTH {
-            let alive_neighbors = count_alive_neighbors(x, y, grid);
-            new_grid[y][x] = matches!(
-                (grid[y][x], alive_neighbors),
-                (true, 2) | (true, 3) | (false, 3)
-            );
+            // Count neighbors: consider a cell alive if its age is >0.
+            let mut alive_neighbors = 0;
+            for i in 0..3 {
+                for j in 0..3 {
+                    if i == 1 && j == 1 { continue; }
+                    let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
+                    let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
+                    if grid[ny][nx] > 0 {
+                        alive_neighbors += 1;
+                    }
+                }
+            }
+            if grid[y][x] > 0 {
+                // Live cell survives if 2 or 3 neighbors; increment age.
+                if alive_neighbors == 2 || alive_neighbors == 3 {
+                    new_grid[y][x] = grid[y][x].saturating_add(1);
+                } else {
+                    new_grid[y][x] = 0;
+                }
+            } else {
+                // Dead cell becomes alive if exactly 3 neighbors.
+                if alive_neighbors == 3 {
+                    new_grid[y][x] = 1;
+                } else {
+                    new_grid[y][x] = 0;
+                }
+            }
         }
     }
     *grid = new_grid;
 }
 
-fn count_alive_neighbors(x: usize, y: usize, grid: &[[bool; GRID_WIDTH]; GRID_HEIGHT]) -> u8 {
-    let mut count = 0;
-    for i in 0..3 {
-        for j in 0..3 {
-            if i == 1 && j == 1 { continue; }
-            let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
-            let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
-            if grid[ny][nx] {
-                count += 1;
-            }
-        }
+/// Maps cell age (1..=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
+fn age_to_color(age: u8) -> Rgb565 {
+    if age == 0 {
+        Rgb565::BLACK
+    } else {
+        let max_age = 10;
+        let a = age.min(max_age) as u32; // clamp age and use u32 for intermediate math
+        let r = ((31 * a) + 5) / max_age as u32;
+        let g = ((63 * a) + 5) / max_age as u32;
+        let b = 31; // Keep blue channel constant
+        // Convert back to u8 and return the color.
+        Rgb565::new(r as u8, g as u8, b)
     }
-    count
 }
 
+/// Draws the game grid using the cell age for color.
 fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
-    grid: &[[bool; GRID_WIDTH]; GRID_HEIGHT],
+    grid: &[[u8; GRID_WIDTH]; GRID_HEIGHT],
 ) -> Result<(), D::Error> {
     let border_color = Rgb565::new(230, 230, 230);
     for (y, row) in grid.iter().enumerate() {
-        for (x, &cell) in row.iter().enumerate() {
-            if cell {
-                let cell_size = Size::new(5, 5);
-                let border_size = Size::new(7, 7);
-                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), border_size)
+        for (x, &age) in row.iter().enumerate() {
+            let point = Point::new(x as i32 * 7, y as i32 * 7);
+            if age > 0 {
+                // Draw a border then fill with color based on age.
+                Rectangle::new(point, Size::new(7, 7))
                     .into_styled(PrimitiveStyle::with_fill(border_color))
                     .draw(display)?;
-                Rectangle::new(Point::new(x as i32 * 7 + 1, y as i32 * 7 + 1), cell_size)
-                    .into_styled(PrimitiveStyle::with_fill(Rgb565::WHITE))
+                // Draw an inner cell with color according to age.
+                Rectangle::new(point + Point::new(1, 1), Size::new(5, 5))
+                    .into_styled(PrimitiveStyle::with_fill(age_to_color(age)))
                     .draw(display)?;
             } else {
-                Rectangle::new(Point::new(x as i32 * 7, y as i32 * 7), Size::new(7, 7))
+                // Draw a dead cell as black.
+                Rectangle::new(point, Size::new(7, 7))
                     .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
                     .draw(display)?;
             }
@@ -166,14 +191,14 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
 
 #[derive(Resource)]
 struct GameOfLifeResource {
-    grid: [[bool; GRID_WIDTH]; GRID_HEIGHT],
+    grid: [[u8; GRID_WIDTH]; GRID_HEIGHT],
     generation: usize,
 }
 
 impl Default for GameOfLifeResource {
     fn default() -> Self {
         Self {
-            grid: [[false; GRID_WIDTH]; GRID_HEIGHT],
+            grid: [[0; GRID_WIDTH]; GRID_HEIGHT],
             generation: 0,
         }
     }
@@ -183,7 +208,7 @@ impl Default for GameOfLifeResource {
 struct RngResource(Rng);
 
 // Because our display type contains DMA descriptors and raw pointers, it isn’t Sync.
-// We wrap it in a NonSend resource so that Bevy doesn’t require Sync.
+// We wrap it as a NonSend resource so that Bevy doesn’t require Sync.
 struct DisplayResource {
     display: MyDisplay,
 }
@@ -201,8 +226,8 @@ fn update_game_of_life_system(
 }
 
 /// Render the game state by drawing into the offscreen framebuffer and then flushing
-/// it to the display via DMA. Instead of converting to a byte slice, we simply iterate
-/// over the owned framebuffer.
+/// it to the display via DMA. After drawing the game grid and generation number,
+/// we overlay centered text.
 fn render_system(
     mut display_res: NonSendMut<DisplayResource>,
     game: Res<GameOfLifeResource>,
@@ -210,13 +235,38 @@ fn render_system(
 ) {
     // Clear the framebuffer.
     fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
-    // Draw the game grid and generation into the framebuffer.
+    // Draw the game grid (using the age-based color) and generation number.
     draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
 
+    // --- Overlay centered text ---
+    let line1 = "Rust no_std ESP32-C6";
+    let line2 = "Bevy ECS 0.15 no_std";
+    // Estimate text width: assume ~8 pixels per character.
+    let line1_width = line1.len() as i32 * 8;
+    let line2_width = line2.len() as i32 * 8;
+    let x1 = (LCD_H_RES as i32 - line1_width) / 2 + 14;
+    let x2 = (LCD_H_RES as i32 - line2_width) / 2 + 14;
+    // For vertical centering, assume 26 pixels total text height.
+    let y = (LCD_V_RES as i32 - 26) / 2;
+    Text::new(
+        line1,
+        Point::new(x1, y),
+        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+    )
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
+    Text::new(
+        line2,
+        Point::new(x2, y + 14),
+        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+    )
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
+
     // Define the area covering the entire framebuffer.
     let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
-    // Since our backend is an owned array of Rgb565, we can simply iterate over it.
+    // Flush the framebuffer to the physical display.
     display_res
         .display
         .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
@@ -226,6 +276,7 @@ fn render_system(
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    // Increase heap size as needed.
     esp_alloc::heap_allocator!(size: 150 * 1024);
     init_logger_from_env();
 
@@ -288,7 +339,7 @@ fn main() -> ! {
     randomize_grid(&mut rng_instance, &mut game.grid);
     let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
     for (x, y) in glider.iter() {
-        game.grid[*y][*x] = true;
+        game.grid[*y][*x] = 1; // alive with age 1
     }
 
     // Create the framebuffer resource.
@@ -297,11 +348,10 @@ fn main() -> ! {
     let mut world = World::default();
     world.insert_resource(game);
     world.insert_resource(RngResource(rng_instance));
-    // The DisplayResource is non‑send because of DMA pointers, so keep that as non‑send.
+    // Insert the display as a non-send resource because its DMA pointers are not Sync.
     world.insert_non_send_resource(DisplayResource { display });
     // Insert the framebuffer resource as a normal resource.
     world.insert_resource(fb_res);
-
 
     let mut schedule = Schedule::default();
     schedule.add_systems(update_game_of_life_system);
