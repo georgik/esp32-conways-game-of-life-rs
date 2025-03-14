@@ -19,7 +19,7 @@ cd esp32-s3-box-3
 cargo run --release
 ```
 
-### ESP32-C6-1.47 Waveshare
+### ESP32-C6-LCD-1.47 Waveshare
 
 [Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on 1.47 inch [ESP32-C6 LCD Waheshare](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer - [Conway's Game of Life](https://github.com/georgik/esp32-conways-game-of-life-rs/tree/main/esp32-c6-waveshare-1_47):
 
@@ -34,3 +34,11 @@ cd esp32-c6-waveshare-1_47
 cargo run --release
 ```
 
+### ESP32-C3-LCDKit
+
+Limitation: Framebuffer fits only to 240x190 pixels. Might be cause by allocation on stack instead of heap.
+
+```
+cd esp32-c3-lcdkit
+cargo run --release
+```

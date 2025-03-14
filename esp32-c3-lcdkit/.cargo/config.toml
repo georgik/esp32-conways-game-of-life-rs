@@ -1,0 +1,21 @@
+[target.xtensa-esp32s3-none-elf]
+runner = "espflash flash --monitor"
+
+[target.riscv32imc-unknown-none-elf]
+runner = "espflash flash --monitor --chip esp32c3"
+
+[target.riscv32imac-unknown-none-elf]
+runner = "espflash flash --monitor --chip esp32c6"
+
+[env]
+ESP_LOG="INFO"
+
+[build]
+rustflags = [
+  "-C", "force-frame-pointers",
+]
+
+target = "riscv32imc-unknown-none-elf"
+
+[unstable]
+build-std = ["alloc", "core"]
