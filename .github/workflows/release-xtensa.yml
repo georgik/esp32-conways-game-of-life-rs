@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v0.5.0)'
+        required: true
+        default: 'v0.5.0'
+
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  xtensa-release:
+    name: Xtensa Release (ESP32-S3 Projects)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust for Xtensa (ESP32-S3)
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: false
+          version: "1.85.0"
+
+      - name: Build ESP32-S3 Projects and collect assets
+        run: |
+          # Build the box project.
+          cd esp32-s3-box-3 && cargo build --release && cd ..
+          # Build the minimal project.
+          cd esp32-s3-box-3-minimal && cargo build --release && cd ..
+          # Create a folder to collect assets.
+          mkdir -p release_xtensa
+          cp esp32-s3-box-3/target/release/esp32-conways-game-of-life-rs release_xtensa/
+          cp esp32-s3-box-3-minimal/target/release/esp32-conways-game-of-life-rs-minimal release_xtensa/
+
+      - name: Create GitHub Release for Xtensa
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: "ESP32 Xtensa Release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Xtensa Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          asset_path: release_xtensa
+          asset_name: xtensa_assets.zip
+
