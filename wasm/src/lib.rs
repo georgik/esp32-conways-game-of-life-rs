@@ -24,6 +24,8 @@ use wasm_bindgen::JsCast;
 use web_sys::{window, CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 use bevy_ecs::prelude::*; // includes Resource, NonSendMut, etc.
 use alloc::format;
+use getrandom;
+
 
 // === LCD & Framebuffer settings ===
 const LCD_H_RES: usize = 320;
@@ -64,14 +66,18 @@ struct GameOfLifeResource {
 
 impl Default for GameOfLifeResource {
     fn default() -> Self {
+        // Create an empty grid.
+        let mut grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
+        // Seed the RNG using your helper.
+        let mut rng = ChaCha8Rng::seed_from_u64(get_seed() as u64);
+        // Fill the grid with random values.
+        randomize_grid(&mut rng, &mut grid);
         Self {
-            grid: [[0; GRID_WIDTH]; GRID_HEIGHT],
+            grid,
             generation: 0,
         }
     }
 }
-
-use getrandom;
 
 // Helper function that returns a u32 seed using getrandom.
 fn get_seed() -> u32 {

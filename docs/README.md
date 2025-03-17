@@ -66,3 +66,16 @@ Limitation: Framebuffer fits only to 240x190 pixels. Might be cause by allocatio
 cd esp32-c3-lcdkit
 cargo run --release
 ```
+
+### WASM
+
+This is experimental implementation for WASM.
+
+```
+cd wasm
+wasm-pack build --target web
+wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/conways_wasm.wasm
+python3 -m http.server
+```
+
+
