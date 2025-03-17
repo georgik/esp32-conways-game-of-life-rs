@@ -260,6 +260,7 @@ pub fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     info!("Starting WASM Conway’s Game of Life");
 
+    // Set up the canvas.
     let document = window().unwrap().document().unwrap();
     let canvas = document.create_element("canvas")?;
     canvas.set_attribute("width", &LCD_H_RES.to_string())?;
@@ -276,31 +277,60 @@ pub fn start() -> Result<(), JsValue> {
     world.insert_resource(GameOfLifeResource::default());
     world.insert_resource(RngResource::default());
     world.insert_resource(FrameBufferResource::new());
-    // Wrap the canvas context in our DisplayResource as a non-send resource.
-    world.insert_non_send_resource(DisplayResource { ctx });
+    // Our DisplayResource is non-send because it contains non-Sync data.
+    world.insert_non_send_resource(DisplayResource::new(ctx));
 
     let mut schedule = Schedule::default();
     schedule.add_systems(update_game_of_life_system);
     schedule.add_systems(render_system);
 
-    // Set up an animation loop using requestAnimationFrame.
-    let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
-    let g = f.clone();
+    // --- Frame Rate Limiter Setup ---
+    let frame_interval_ms = 100.0;
+    let last_frame = Rc::new(RefCell::new(0.0));
 
-    // Get the window and clone it for use inside the closure.
+    // Create an Rc<RefCell<Option<Closure<...>>>> to store the animation loop closure.
+    let f: Rc<RefCell<Option<Closure<dyn FnMut()>>>> = Rc::new(RefCell::new(None));
+    // Clone the Rc so we can move the clone into the closure.
+    let f_clone = f.clone();
+
     let win = window().unwrap();
     let win_clone = win.clone();
 
-    *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
-        schedule.run(&mut world);
-        // Use the clone inside the closure.
-        win_clone
-            .request_animation_frame(f.borrow().as_ref().unwrap().as_ref().unchecked_ref())
-            .unwrap();
+    // Set up our animation closure.
+    *f.borrow_mut() = Some(Closure::wrap(Box::new({
+        let last_frame = last_frame.clone();
+        move || {
+            // Get the current time in milliseconds.
+            let now = win_clone.performance().unwrap().now();
+            {
+                let mut last = last_frame.borrow_mut();
+                // Only update if enough time has passed.
+                if now - *last >= frame_interval_ms {
+                    schedule.run(&mut world);
+                    *last = now;
+                }
+            }
+            // Schedule the next frame using the clone.
+            win_clone
+                .request_animation_frame(
+                    f_clone
+                        .borrow()
+                        .as_ref()
+                        .unwrap()
+                        .as_ref()
+                        .unchecked_ref(),
+                )
+                .unwrap();
+        }
     }) as Box<dyn FnMut()>));
 
-    win.request_animation_frame(g.borrow().as_ref().unwrap().as_ref().unchecked_ref())
-        .unwrap();
-
+    // Kick off the animation loop.
+    win.request_animation_frame(
+        f.borrow()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unchecked_ref(),
+    )?;
     Ok(())
 }
