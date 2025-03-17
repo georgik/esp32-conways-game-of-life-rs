@@ -4,7 +4,6 @@ on:
   push:
     paths-ignore:
       - "**/README.md"
-  pull_request:
   workflow_dispatch:
 
 env:
@@ -12,17 +11,19 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  esp32-checks:
+  esp32:
     name: ESP32 Checks
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        project: [ "esp32-c3-lcdkit", "esp32-c6-waveshare-1_47", "esp32-s3-box-3", "esp32-s3-box-3-minimal" ]
-        action:
-          - { command: build, args: "--release" }
-          - { command: fmt, args: "--all -- --check --color always" }
-          - { command: clippy, args: "--all-features --workspace -- -D warnings" }
+        project:
+          - esp32-c3-lcdkit
+          - esp32-c6-waveshare-1_47
+          - esp32-s3-box-3
+          - esp32-s3-box-3-minimal
+        # For esp32-s3 projects we use the esp-rs xtensa toolchain; for others we use the default stable.
+        xtensa: [ true, false ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,29 +31,38 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup Rust for ESP32
-        uses: esp-rs/xtensa-toolchain@v1.5
+      - name: Setup Rust toolchain for ESP32
+        if: matrix.xtensa == true
+        uses: esp-rs/xtensa-toolchain@v1.5.4
         with:
           default: true
           buildtargets: esp32s3
           ldproxy: false
+          version: "1.85.0"
+
+      - name: Setup Rust toolchain for non-Xtensa ESP32 targets
+        if: matrix.xtensa == false
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: clippy, rustfmt
 
       - name: Change directory to project
         run: cd ${{ matrix.project }}
 
-      - name: Run command
-        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+      - name: Cargo Build
+        run: cargo build --release
 
-  wasm-checks:
+      - name: Cargo Fmt Check
+        run: cargo fmt --all -- --check --color always
+
+      - name: Cargo Clippy
+        run: cargo clippy --all-features --workspace -- -D warnings
+
+  wasm:
     name: WASM Checks
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        action:
-          - { command: build, args: "--target wasm32-unknown-unknown --release" }
-          - { command: fmt, args: "--all -- --check --color always" }
-          - { command: clippy, args: "--all-features --workspace -- -D warnings" }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -60,14 +70,22 @@ jobs:
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
 
-      - name: Setup Rust for WASM
+      - name: Setup Rust toolchain for WASM
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           target: wasm32-unknown-unknown
+          override: true
+          components: clippy, rustfmt
 
       - name: Change directory to wasm
         run: cd wasm
 
-      - name: Run command
-        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+      - name: Cargo Build for WASM
+        run: cargo build --release --target wasm32-unknown-unknown
+
+      - name: Cargo Fmt Check for WASM
+        run: cargo fmt --all -- --check --color always
+
+      - name: Cargo Clippy for WASM
+        run: cargo clippy --all-features --workspace -- -D warnings
