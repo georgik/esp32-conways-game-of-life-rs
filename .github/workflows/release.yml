@@ -20,6 +20,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install espup and toolchain 1.85.0.0
+        run: |
+          cargo install espup --locked
+          espup install --toolchain-version 1.85.0.0
+          source ~/export-esp.sh
+
       - name: Setup Rust for Xtensa (ESP32-S3)
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
@@ -29,16 +35,14 @@ jobs:
 
       - name: Build ESP32-S3 Projects and collect assets
         run: |
-          # Build ESP32-S3 box project
-          cd esp32-s3-box-3
-          cargo build --release
-          # Build minimal version
-          cd ../esp32-s3-box-3-minimal
-          cargo build --release
+          # Build the box project.
+          cd esp32-s3-box-3 && cargo build --release && cd ..
+          # Build the minimal project.
+          cd esp32-s3-box-3-minimal && cargo build --release && cd ..
           # Create a folder to collect assets.
           mkdir -p release_xtensa
-          cp ../esp32-s3-box-3/target/release/your_xtensa_binary release_xtensa/
-          cp target/release/your_xtensa_minimal_binary release_xtensa/
+          cp esp32-s3-box-3/target/release/esp32-conways-game-of-life-rs release_xtensa/
+          cp esp32-s3-box-3-minimal/target/release/esp32-conways-game-of-life-rs-minimal release_xtensa/
 
       - name: Create GitHub Release for Xtensa
         uses: softprops/action-gh-release@v1
@@ -70,10 +74,9 @@ jobs:
 
       - name: Build ESP32-C3 Project and collect assets
         run: |
-          cd esp32-c3-lcdkit
-          cargo build --release
+          cd esp32-c3-lcdkit && cargo build --release && cd ..
           mkdir -p release_riscv
-          cp target/release/your_riscv_binary release_riscv/
+          cp esp32-c3-lcdkit/target/riscv32imac-unknown-none-elf/release/esp32-conways-game-of-life-rs release_riscv/
 
       - name: Create GitHub Release for RISC-V
         uses: softprops/action-gh-release@v1
@@ -87,8 +90,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version }}
-          asset_path: release_riscv
-          asset_name: riscv_assets.zip
+          files: release_riscv/*
 
   wasm-release:
     name: WASM Release
@@ -102,6 +104,9 @@ jobs:
         with:
           toolchain: stable
           target: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli
 
       - name: Build WASM project
         run: |
