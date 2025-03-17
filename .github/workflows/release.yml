@@ -3,76 +3,133 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: "Release tag to use (e.g., v1.2.3)"
+      version:
+        description: 'Release version tag (e.g. v0.5.0)'
         required: true
-      release_name:
-        description: "Optional release name (defaults to release tag)"
-        required: false
-      publish_wasm:
-        description: "Publish WASM package as asset (true/false)"
-        required: false
-        default: "true"
+        default: 'v0.5.0'
 
 env:
   CARGO_TERM_COLOR: always
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  build:
-    name: Build Targets for Release
+  xtensa-release:
+    name: Xtensa Release (ESP32-S3 Projects)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - esp32-s3
-          - esp32-c3
-          - esp32-c6
-          - wasm32-unknown-unknown
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Enable Rust caching
-        uses: Swatinem/rust-cache@v2
+      - name: Setup Rust for Xtensa (ESP32-S3)
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: false
 
-      - name: Setup Rust toolchain
+      - name: Build ESP32-S3 Projects and collect assets
+        run: |
+          # Build ESP32-S3 box project
+          cd esp32-s3-box-3
+          cargo build --release
+          # Build minimal version
+          cd ../esp32-s3-box-3-minimal
+          cargo build --release
+          # Create a folder to collect assets.
+          mkdir -p release_xtensa
+          cp ../esp32-s3-box-3/target/release/your_xtensa_binary release_xtensa/
+          cp target/release/your_xtensa_minimal_binary release_xtensa/
+
+      - name: Create GitHub Release for Xtensa
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: "ESP32 Xtensa Release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Xtensa Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          asset_path: release_xtensa
+          asset_name: xtensa_assets.zip
+
+  riscv-release:
+    name: RISC-V Release (ESP32-C3 Projects)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust for RISC-V
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
-          components: clippy, rustfmt
+          target: riscv32imac-unknown-none-elf
 
-      - name: Build for ${{ matrix.target }}
-        run: cargo build --release --target ${{ matrix.target }}
+      - name: Build ESP32-C3 Project and collect assets
+        run: |
+          cd esp32-c3-lcdkit
+          cargo build --release
+          mkdir -p release_riscv
+          cp target/release/your_riscv_binary release_riscv/
 
-  release:
-    name: Create GitHub Release
+      - name: Create GitHub Release for RISC-V
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: "ESP32-C3 Release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload RISC-V Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          asset_path: release_riscv
+          asset_name: riscv_assets.zip
+
+  wasm-release:
+    name: WASM Release
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Create GitHub Release
-        id: create_release
+      - name: Setup Rust for WASM
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      - name: Build WASM project
+        run: |
+          cd wasm
+          cargo build --release --target wasm32-unknown-unknown
+
+      - name: Run wasm-bindgen
+        run: |
+          cd wasm
+          wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/conways_wasm.wasm
+
+      - name: Package WASM assets
+        run: |
+          cd wasm/pkg
+          zip -r wasm_package.zip .
+          mv wasm_package.zip ../../release_wasm.zip
+
+      - name: Create GitHub Release for WASM
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.event.inputs.release_tag }}
-          name: ${{ github.event.inputs.release_name || github.event.inputs.release_tag }}
-          draft: false
-          prerelease: false
+          tag_name: ${{ github.event.inputs.version }}
+          name: "WASM Release"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload WASM Package
-        if: ${{ github.event.inputs.publish_wasm == 'true' }}
+      - name: Upload WASM Assets
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.event.inputs.release_tag }}
-          name: "WASM Package"
-          files: |
-            wasm/pkg/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.event.inputs.version }}
+          asset_path: release_wasm.zip
+          asset_name: wasm_package.zip
