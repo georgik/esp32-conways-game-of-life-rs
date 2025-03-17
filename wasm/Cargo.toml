@@ -1,0 +1,33 @@
+[package]
+name = "conways-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2.100"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageData"
+] }
+console_error_panic_hook = "0.1"
+log = "0.4"
+embedded-graphics = "0.8.1"
+embedded-graphics-framebuf = "0.5.0"
+embedded-graphics-web-simulator = "0.4.0"
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "06cb5c5", default-features = false }
+heapless = "0.8.0"
+console = "0.15.11"
+getrandom = { version = "0.2.8", features = ["js"] }
+rand_chacha = { version = "0.3.1", default-features = false }
+rand_core = "0.6.4"
+
+#[package.metadata.wasm-pack]
+#wasm-opt = false
+#[package.metadata.wasm-pack.profile.release]
+#wasm-opt = false
