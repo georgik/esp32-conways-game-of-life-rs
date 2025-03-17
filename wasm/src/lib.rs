@@ -9,23 +9,22 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt::Write;
 
+use alloc::format;
+use bevy_ecs::prelude::*; // includes Resource, NonSendMut, etc.
 use embedded_graphics::{
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    Drawable,
+    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
-    Drawable,
 };
 use embedded_graphics_framebuf::FrameBuf;
-use log::info;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::{window, CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
-use bevy_ecs::prelude::*; // includes Resource, NonSendMut, etc.
-use alloc::format;
 use getrandom;
-
+use log::info;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData, window};
 
 // === LCD & Framebuffer settings ===
 const LCD_H_RES: usize = 320;
@@ -87,7 +86,7 @@ fn get_seed() -> u32 {
 }
 
 use rand_chacha::ChaCha8Rng;
-use rand_core::{SeedableRng, RngCore};
+use rand_core::{RngCore, SeedableRng};
 #[derive(Resource)]
 struct RngResource(ChaCha8Rng);
 
@@ -130,7 +129,9 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
             let mut alive_neighbors = 0;
             for i in 0..3 {
                 for j in 0..3 {
-                    if i == 1 && j == 1 { continue; }
+                    if i == 1 && j == 1 {
+                        continue;
+                    }
                     let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
                     let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
                     if grid[ny][nx] > 0 {
@@ -166,7 +167,10 @@ fn age_to_color(age: u8) -> Rgb565 {
     }
 }
 
-fn draw_grid<D: DrawTarget<Color = Rgb565>>(display: &mut D, grid: &[[u8; GRID_WIDTH]; GRID_HEIGHT]) -> Result<(), D::Error> {
+fn draw_grid<D: DrawTarget<Color = Rgb565>>(
+    display: &mut D,
+    grid: &[[u8; GRID_WIDTH]; GRID_HEIGHT],
+) -> Result<(), D::Error> {
     let border_color = Rgb565::new(230, 230, 230);
     for (y, row) in grid.iter().enumerate() {
         for (x, &age) in row.iter().enumerate() {
@@ -188,7 +192,10 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(display: &mut D, grid: &[[u8; GRID_W
     Ok(())
 }
 
-fn write_generation<D: DrawTarget<Color = Rgb565>>(display: &mut D, generation: usize) -> Result<(), D::Error> {
+fn write_generation<D: DrawTarget<Color = Rgb565>>(
+    display: &mut D,
+    generation: usize,
+) -> Result<(), D::Error> {
     let mut num_str = String::new();
     write!(&mut num_str, "{}", generation).unwrap();
     Text::new(
@@ -196,12 +203,15 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(display: &mut D, generation: 
         Point::new(8, 13),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-        .draw(display)?;
+    .draw(display)?;
     Ok(())
 }
 
 // === ECS Systems ===
-fn update_game_of_life_system(mut game: ResMut<GameOfLifeResource>, mut rng_res: ResMut<RngResource>) {
+fn update_game_of_life_system(
+    mut game: ResMut<GameOfLifeResource>,
+    mut rng_res: ResMut<RngResource>,
+) {
     update_game_of_life(&mut game.grid);
     game.generation += 1;
     if game.generation >= RESET_AFTER_GENERATIONS {
@@ -210,7 +220,11 @@ fn update_game_of_life_system(mut game: ResMut<GameOfLifeResource>, mut rng_res:
     }
 }
 
-fn render_system(mut display_res: NonSendMut<DisplayResource>, game: Res<GameOfLifeResource>, mut fb_res: ResMut<FrameBufferResource>) {
+fn render_system(
+    mut display_res: NonSendMut<DisplayResource>,
+    game: Res<GameOfLifeResource>,
+    mut fb_res: ResMut<FrameBufferResource>,
+) {
     fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
     draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
@@ -228,15 +242,15 @@ fn render_system(mut display_res: NonSendMut<DisplayResource>, game: Res<GameOfL
         Point::new(x1, y),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-        .draw(&mut fb_res.frame_buf)
-        .unwrap();
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
     Text::new(
         line2,
         Point::new(x2, y + 14),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-        .draw(&mut fb_res.frame_buf)
-        .unwrap();
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
 
     // Flush the framebuffer to the canvas.
     update_canvas(&display_res.ctx, &fb_res.frame_buf);
@@ -256,8 +270,9 @@ fn update_canvas(ctx: &CanvasRenderingContext2d, fb: &MyFrameBuf) {
         out.push(255);
     }
     let clamped = wasm_bindgen::Clamped(&out[..]);
-    let image_data = ImageData::new_with_u8_clamped_array_and_sh(clamped, LCD_H_RES as u32, LCD_V_RES as u32)
-        .unwrap();
+    let image_data =
+        ImageData::new_with_u8_clamped_array_and_sh(clamped, LCD_H_RES as u32, LCD_V_RES as u32)
+            .unwrap();
     ctx.put_image_data(&image_data, 0.0, 0.0).unwrap();
 }
 
@@ -319,24 +334,13 @@ pub fn start() -> Result<(), JsValue> {
             // Schedule the next frame using the clone.
             win_clone
                 .request_animation_frame(
-                    f_clone
-                        .borrow()
-                        .as_ref()
-                        .unwrap()
-                        .as_ref()
-                        .unchecked_ref(),
+                    f_clone.borrow().as_ref().unwrap().as_ref().unchecked_ref(),
                 )
                 .unwrap();
         }
     }) as Box<dyn FnMut()>));
 
     // Kick off the animation loop.
-    win.request_animation_frame(
-        f.borrow()
-            .as_ref()
-            .unwrap()
-            .as_ref()
-            .unchecked_ref(),
-    )?;
+    win.request_animation_frame(f.borrow().as_ref().unwrap().as_ref().unchecked_ref())?;
     Ok(())
 }

@@ -12,29 +12,62 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  rust-checks:
-    name: Rust Checks
+  esp32-checks:
+    name: ESP32 Checks
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        project: [ "esp32-c3-lcdkit", "esp32-c6-waveshare-1_47", "esp32-s3-box-3", "esp32-s3-box-3-minimal" ]
         action:
-          - command: build
-            args: --release
-          - command: fmt
-            args: --all -- --check --color always
-          - command: clippy
-            args: --all-features --workspace -- -D warnings
+          - { command: build, args: "--release" }
+          - { command: fmt, args: "--all -- --check --color always" }
+          - { command: clippy, args: "--all-features --workspace -- -D warnings" }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
-      - name: Setup Rust
+
+      - name: Setup Rust for ESP32
         uses: esp-rs/xtensa-toolchain@v1.5
         with:
           default: true
           buildtargets: esp32s3
           ldproxy: false
+
+      - name: Change directory to project
+        run: cd ${{ matrix.project }}
+
+      - name: Run command
+        run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
+
+  wasm-checks:
+    name: WASM Checks
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        action:
+          - { command: build, args: "--target wasm32-unknown-unknown --release" }
+          - { command: fmt, args: "--all -- --check --color always" }
+          - { command: clippy, args: "--all-features --workspace -- -D warnings" }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup Rust for WASM
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      - name: Change directory to wasm
+        run: cd wasm
+
       - name: Run command
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}
