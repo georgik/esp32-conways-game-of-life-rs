@@ -29,7 +29,7 @@ use esp_hal::dma_buffers;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::{interface::SpiInterface, options::ColorInversion};
+use mipidsi::{interface::SpiInterface, options::{ColorInversion, Orientation, ColorOrder}};
 use mipidsi::{models::ILI9486Rgb565, Builder};
 use bevy_ecs::prelude::*; // includes NonSend and NonSendMut
 
@@ -53,7 +53,7 @@ type MyDisplay = mipidsi::Display<
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
 const LCD_H_RES: usize = 320;
-const LCD_V_RES: usize = 120;
+const LCD_V_RES: usize = 240;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
 // We want our pixels stored as Rgb565.
@@ -240,7 +240,7 @@ fn render_system(
     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
 
     // --- Overlay centered text ---
-    let line1 = "Rust no_std ESP32-C6";
+    let line1 = "Rust no_std ESP32-S3";
     let line2 = "Bevy ECS 0.15 no_std";
     // Estimate text width: assume ~8 pixels per character.
     let line1_width = line1.len() as i32 * 8;
@@ -276,8 +276,12 @@ fn render_system(
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-    // Increase heap size as needed.
-    esp_alloc::heap_allocator!(size: 150 * 1024);
+
+    // PSRAM allocator for heap memory.
+    // Note: Placing framebuffer into PSRAM might result into slower redraw.
+    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    // esp_alloc::heap_allocator!(size: 150 * 1024);
+
     init_logger_from_env();
 
     // --- DMA Buffers for SPI ---
@@ -316,7 +320,9 @@ fn main() -> ! {
     let mut display: MyDisplay = Builder::new(ILI9486Rgb565, di)
         .reset_pin(reset)
         .display_size(320, 240)
-        .invert_colors(ColorInversion::Inverted)
+        // .orientation(Orientation::new().flip_horizontal())
+        .color_order(ColorOrder::Bgr)
+        // .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)
         .unwrap();
 
