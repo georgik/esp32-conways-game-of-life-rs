@@ -63,8 +63,8 @@ jobs:
           # Create a folder to collect assets.
           mkdir -p release_xtensa
           # Adjust these paths as needed to point to your built binaries.
-          cp "${{ github.event.inputs.target_box }}/target/release/esp32-conways-game-of-life-rs" release_xtensa/
-          cp "${{ github.event.inputs.target_minimal }}/target/release/esp32-conways-game-of-life-rs-minimal" release_xtensa/
+          cp "${{ github.event.inputs.target_box }}/target/xtensa-esp32s3-none-elf/release/esp32-conways-game-of-life-rs" release_xtensa/
+          cp "${{ github.event.inputs.target_minimal }}/target/xtensa-esp32s3-none-elf/release/esp32-conways-game-of-life-rs-minimal" release_xtensa/
 
       - name: Install GitHub CLI
         run: sudo apt-get install -y gh
