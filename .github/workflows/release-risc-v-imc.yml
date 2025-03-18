@@ -1,12 +1,24 @@
-name: Release
+name: Release RISC-V IMC
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release version tag (e.g. v0.5.0)'
+      release_name:
+        description: 'Name of the GitHub Release'
         required: true
         default: 'v0.5.0'
+      release_tag:
+        description: 'Tag for the GitHub Release'
+        required: true
+        default: 'v0.5.0'
+      prefix:
+        description: 'Prefix for binary name'
+        required: true
+        default: 'esp32-conways-game-of-life'
+      target:
+        description: 'Target directory for the ESP32-C3 project (e.g. esp32-c3-lcdkit)'
+        required: true
+        default: 'esp32-c3-lcdkit'
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,7 +29,7 @@ jobs:
     name: RISC-V IMC Release (ESP32-C3 Projects)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Rust for RISC-V IMC
@@ -26,102 +38,47 @@ jobs:
           toolchain: stable
           target: riscv32imc-unknown-none-elf
 
-      - name: Build ESP32-C3 Project and collect assets
+      - name: Build ESP32-C3 Project and Collect Assets
         run: |
-          cd esp32-c3-lcdkit && cargo build --release && cd ..
-          mkdir -p release_riscv
-          cp esp32-c3-lcdkit/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs release_riscv/
+          cd "${{ github.event.inputs.target }}"
+          cargo build --release
+          cd ..
+          mkdir -p release_riscv_imc
+          # Adjust the binary name/path as needed.
+          cp "${{ github.event.inputs.target }}/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imc/
 
-      - name: Create GitHub Release for RISC-V
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: "ESP32-C3 Release"
+      - name: Install GitHub CLI
+        run: sudo apt-get update && sudo apt-get install -y gh
+
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Check if Release Exists
+        id: check_release
+        run: |
+          set +e
+          gh release view "${{ github.event.inputs.release_tag }}" > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "Release already exists."
+            echo "release_exists=true" >> $GITHUB_ENV
+          else
+            echo "Release does not exist."
+            echo "release_exists=false" >> $GITHUB_ENV
+          fi
+          set -e
+
+      - name: Create Release if Needed
+        if: env.release_exists == 'false'
+        run: |
+          gh release create "${{ github.event.inputs.release_tag }}" --title "${{ github.event.inputs.release_name }}" --prerelease
+
+      - name: Upload RISC-V IMC Assets
+        run: |
+          for file in $(find release_riscv_imc -type f); do
+            base=$(basename "$file")
+            asset_name="${{ github.event.inputs.prefix }}-${{ github.event.inputs.release_tag }}-${base}"
+            echo "Uploading $file as $asset_name"
+            gh release upload "${{ github.event.inputs.release_tag }}" "$file#${asset_name}" --clobber
+          done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload RISC-V Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          files: release_riscv/*
-
-    riscv-imac-release:
-    name: RISC-V IMAC Release (ESP32-C6 Projects)
-    runs-on: ubuntu-latest
-    steps:
-        - name: Checkout repository
-          uses: actions/checkout@v4
-
-        - name: Setup Rust for RISC-V IMAC
-          uses: actions-rs/toolchain@v1
-          with:
-            toolchain: stable
-            target: riscv32imac-unknown-none-elf
-
-        - name: Build ESP32-C6 Project and collect assets
-          run: |
-            cd esp32-c6-waveshare-1_47 && cargo build --release && cd ..
-            mkdir -p release_riscv
-            cp esp32-c6-waveshare-1_47/target/riscv32imac-unknown-none-elf/release/esp32-conways-game-of-life-rs release_riscv/
-
-        - name: Create GitHub Release for RISC-V
-          uses: softprops/action-gh-release@v1
-          with:
-            tag_name: ${{ github.event.inputs.version }}
-            name: "ESP32-C6 Release"
-          env:
-            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-        - name: Upload RISC-V Assets
-          uses: softprops/action-gh-release@v1
-          with:
-            tag_name: ${{ github.event.inputs.version }}
-            files: release_riscv/*
-
-  wasm-release:
-    name: WASM Release
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Rust for WASM
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: wasm32-unknown-unknown
-
-      - name: Install wasm-bindgen CLI
-        run: cargo install wasm-bindgen-cli
-
-      - name: Build WASM project
-        run: |
-          cd wasm
-          cargo build --release --target wasm32-unknown-unknown
-
-      - name: Run wasm-bindgen
-        run: |
-          cd wasm
-          wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/conways_wasm.wasm
-
-      - name: Package WASM assets
-        run: |
-          cd wasm/pkg
-          zip -r wasm_package.zip .
-          mv wasm_package.zip ../../release_wasm.zip
-
-      - name: Create GitHub Release for WASM
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: "WASM Release"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload WASM Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          asset_path: release_wasm.zip
-          asset_name: wasm_package.zip
