@@ -48,10 +48,10 @@ jobs:
           cp "${{ github.event.inputs.target }}/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imc/
 
       - name: Install GitHub CLI
-        run: sudo apt-get update && sudo apt-get install -y gh
+        run: sudo apt-get install gh
 
       - name: Authenticate GitHub CLI
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+        run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Check if Release Exists
         id: check_release
