@@ -15,7 +15,7 @@ on:
         description: 'Prefix for binary name'
         required: true
         default: 'esp32-conways-game-of-life'
-      target:
+      board:
         description: 'Target directory for the ESP32-C3 project (e.g. esp32-c3-lcdkit)'
         required: true
         default: 'esp32-c3-lcdkit'
@@ -40,18 +40,12 @@ jobs:
 
       - name: Build ESP32-C3 Project and Collect Assets
         run: |
-          cd "${{ github.event.inputs.target }}"
+          cd "${{ github.event.inputs.board }}"
           cargo build --release
           cd ..
           mkdir -p release_riscv_imc
           # Adjust the binary name/path as needed.
-          cp "${{ github.event.inputs.target }}/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imc/
-
-    #   - name: Install GitHub CLI
-    #     run: sudo apt-get install gh
-
-    #   - name: Authenticate GitHub CLI
-    #     run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+          cp "${{ github.event.inputs.board }}/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imc/
 
       - name: Check if Release Exists
         id: check_release
@@ -80,7 +74,7 @@ jobs:
         run: |
           for file in $(find release_riscv_imc -type f); do
             base=$(basename "$file")
-            asset_name="${{ github.event.inputs.prefix }}-${{ github.event.inputs.release_tag }}-${base}"
+            asset_name="${{ github.event.inputs.prefix }}-${{ github.event.inputs.release_tag }}-${{ github.event.inputs.board }}.bin"
             echo "Uploading $file as $asset_name"
             gh release upload "${{ github.event.inputs.release_tag }}" "$file#${asset_name}" --clobber
           done
