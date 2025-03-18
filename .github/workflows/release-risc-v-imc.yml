@@ -76,6 +76,7 @@ jobs:
             base=$(basename "$file")
             asset_name="${{ github.event.inputs.prefix }}-${{ github.event.inputs.release_tag }}-${{ github.event.inputs.board }}.bin"
             echo "Uploading $file as $asset_name"
+            ls -l $file
             gh release upload "${{ github.event.inputs.release_tag }}" "$file#${asset_name}" --clobber
           done
         env:
