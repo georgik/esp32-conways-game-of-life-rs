@@ -1,12 +1,28 @@
-name: Release
+name: Release Xtensa
 
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release version tag (e.g. v0.5.0)'
+      release_name:
+        description: 'Name of the GitHub Release'
         required: true
         default: 'v0.5.0'
+      release_tag:
+        description: 'Tag for the GitHub Release'
+        required: true
+        default: 'v0.5.0'
+      prefix:
+        description: 'Prefix for binary name'
+        required: true
+        default: 'esp32-conways-game-of-life'
+      target_box:
+        description: 'Target directory for the box project (e.g. esp32-s3-box-3)'
+        required: true
+        default: 'esp32-s3-box-3'
+      target_minimal:
+        description: 'Target directory for the minimal project (e.g. esp32-s3-box-3-minimal)'
+        required: true
+        default: 'esp32-s3-box-3-minimal'
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,8 +33,14 @@ jobs:
     name: Xtensa Release (ESP32-S3 Projects)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Install espup and set toolchain 1.85.0.0
+        run: |
+          cargo install espup --locked
+          espup install --toolchain-version 1.85.0.0
+          source ~/export-esp.sh
 
       - name: Setup Rust for Xtensa (ESP32-S3)
         uses: esp-rs/xtensa-toolchain@v1.5
@@ -28,29 +50,54 @@ jobs:
           ldproxy: false
           version: "1.85.0"
 
-      - name: Build ESP32-S3 Projects and collect assets
+      - name: Build Xtensa Projects and Collect Assets
         run: |
           # Build the box project.
-          cd esp32-s3-box-3 && cargo build --release && cd ..
+          cd "${{ github.event.inputs.target_box }}"
+          cargo build --release
+          cd ..
           # Build the minimal project.
-          cd esp32-s3-box-3-minimal && cargo build --release && cd ..
+          cd "${{ github.event.inputs.target_minimal }}"
+          cargo build --release
+          cd ..
           # Create a folder to collect assets.
           mkdir -p release_xtensa
-          cp esp32-s3-box-3/target/release/esp32-conways-game-of-life-rs release_xtensa/
-          cp esp32-s3-box-3-minimal/target/release/esp32-conways-game-of-life-rs-minimal release_xtensa/
+          # Adjust these paths as needed to point to your built binaries.
+          cp "${{ github.event.inputs.target_box }}/target/release/esp32-conways-game-of-life-rs" release_xtensa/
+          cp "${{ github.event.inputs.target_minimal }}/target/release/esp32-conways-game-of-life-rs-minimal" release_xtensa/
 
-      - name: Create GitHub Release for Xtensa
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          name: "ESP32 Xtensa Release"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install GitHub CLI
+        run: sudo apt-get install -y gh
+
+      - name: Authenticate GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Check if Release Exists
+        id: check_release
+        run: |
+          set +e
+          gh release view "${{ github.event.inputs.release_tag }}" > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "Release already exists."
+            echo "release_exists=true" >> $GITHUB_ENV
+          else
+            echo "Release does not exist."
+            echo "release_exists=false" >> $GITHUB_ENV
+          fi
+          set -e
+
+      - name: Create Release if Needed
+        if: env.release_exists == 'false'
+        run: |
+          gh release create "${{ github.event.inputs.release_tag }}" --title "${{ github.event.inputs.release_name }}" --prerelease
 
       - name: Upload Xtensa Assets
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.event.inputs.version }}
-          asset_path: release_xtensa
-          asset_name: xtensa_assets.zip
-
+        run: |
+          for file in $(find release_xtensa -type f); do
+            base=$(basename "$file")
+            asset_name="${{ github.event.inputs.prefix }}-${{ github.event.inputs.release_tag }}-${base}"
+            echo "Uploading $file as $asset_name"
+            gh release upload "${{ github.event.inputs.release_tag }}" "$file#${asset_name}" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
