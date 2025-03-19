@@ -1,4 +1,4 @@
-name: Release
+name: Release RISC-V IMAC
 
 on:
   workflow_dispatch:
@@ -44,8 +44,7 @@ jobs:
         run: |
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
           cargo binstall espflash
-          cd "${{ github.event.inputs.board }}"
-          cd esp32-c6-waveshare-1_47 && cargo build --release && cd ..
+          cd "${{ github.event.inputs.board }}" && cargo build --release && cd ..
           mkdir -p release_riscv_imac
           espflash save-image --chip esp32c3 "${{ github.event.inputs.board }}/target/riscv32imac-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imac/esp32-conways-game-of-life-rs
 

@@ -3,7 +3,6 @@
 
 // use esp_bsp::prelude::*;
 // use esp_display_interface_spi_dma::display_interface_spi_dma;
-use embedded_hal_bus::spi::ExclusiveDevice;
 use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -13,15 +12,16 @@ use embedded_graphics::{
     text::Text,
     Drawable,
 };
+use embedded_hal_bus::spi::ExclusiveDevice;
 #[allow(unused_imports)]
 use esp_backtrace as _;
 // use esp_hal::gpio::OutputOpenDrain;
 use esp_hal::rng::Rng;
 use esp_hal::{
     delay::Delay,
-    gpio::{Level, Output, OutputConfig, DriveMode},
-    spi::master::Spi,
+    gpio::{DriveMode, Level, Output, OutputConfig},
     main,
+    spi::master::Spi,
     time::Rate,
 };
 use mipidsi::interface::SpiInterface;
@@ -173,7 +173,7 @@ fn main() -> ! {
         .with_mosi(peripherals.GPIO6)
         // .with_cs((peripherals.GPIO5))
     ;
-        // .with_dma((peripherals.DMA_CH0));
+    // .with_dma((peripherals.DMA_CH0));
     // let mut spi = Spi::new(
     //     peripherals.SPI2,
     //     esp_hal::spi::master::Config::default()
@@ -199,7 +199,7 @@ fn main() -> ! {
 
     // let di = display_interface_spi_dma::new_no_cs(crate::LCD_MEMORY_SIZE, spi, lcd_dc);
     // let di = SpiInterface::new(spi_device, dc, &mut buffer);
-// }
+    // }
     let mut delay = Delay::new();
     delay.delay_ns(500_000u32);
 
@@ -214,7 +214,11 @@ fn main() -> ! {
     //     .reset_pin(OutputOpenDrain::new(peripherals.GPIO48, Level::High, Pull::Up)
     //     );
 
-    let reset = Output::new(peripherals.GPIO48, Level::High, OutputConfig::default().with_drive_mode(DriveMode::OpenDrain));
+    let reset = Output::new(
+        peripherals.GPIO48,
+        Level::High,
+        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
+    );
 
     let mut display = Builder::new(ILI9486Rgb565, di)
         .reset_pin(reset)
@@ -267,7 +271,6 @@ fn main() -> ! {
 
         // // Send the pixels to the display
         // Rgb565::send_pixels(&mut display, pixel_iterator).unwrap();
-
 
         // Add a delay to control the simulation speed
         delay.delay_ms(100u32);

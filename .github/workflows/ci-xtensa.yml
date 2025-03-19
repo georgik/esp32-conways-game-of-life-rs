@@ -1,0 +1,63 @@
+name: Release Xtensa
+
+on:
+  push:
+    paths:
+      - "esp32-s3-box-3/**"
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: 'Name of the GitHub Release'
+        required: true
+        default: 'v0.5.0'
+      release_tag:
+        description: 'Tag for the GitHub Release'
+        required: true
+        default: 'v0.5.0'
+      prefix:
+        description: 'Prefix for binary name'
+        required: true
+        default: 'esp32-conways-game-of-life'
+      target_box:
+        description: 'Target directory for the box project (e.g. esp32-s3-box-3)'
+        required: true
+        default: 'esp32-s3-box-3'
+      target_minimal:
+        description: 'Target directory for the minimal project (e.g. esp32-s3-box-3-minimal)'
+        required: true
+        default: 'esp32-s3-box-3-minimal'
+
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  xtensa-release:
+    name: Xtensa Release (ESP32-S3 Projects)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install espup and set toolchain 1.85.0.0
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall espflash espup
+          espup install --toolchain-version 1.85.0.0
+          source ~/export-esp.sh
+
+      - name: Setup Rust for Xtensa (ESP32-S3)
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: false
+          version: "1.85.0"
+
+      - name: Build Xtensa Projects, Create Flashable Images, and Collect Assets
+        run: |
+          # Build the box project.
+          cd "${{ github.event.inputs.target_box }}"
+          cargo build --release
+          cargo fmt --all -- --check --color always
+          cargo clippy --all-features --workspace -- -D warnings
