@@ -44,8 +44,8 @@ jobs:
           cargo build --release
           cd ..
           mkdir -p release_riscv_imc
-          # Adjust the binary name/path as needed.
-          cp "${{ github.event.inputs.board }}/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imc/
+          cargo install espflash
+          espflash save-image --chip esp32c3 "${{ github.event.inputs.board }}/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imc/esp32-conways-game-of-life-rs
 
       - name: Check if Release Exists
         id: check_release
