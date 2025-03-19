@@ -332,7 +332,7 @@ fn main() -> ! {
     let mut display: MyDisplay = Builder::new(ILI9341Rgb565, di)
         .reset_pin(reset)
         .display_size(240, 320)
-        .orientation(Orientation::new().rotate(Rotation::Deg90))
+        .orientation(Orientation::new().rotate(Rotation::Deg90).flip_horizontal())
 
         .color_order(ColorOrder::Bgr)
         // .invert_colors(ColorInversion::Inverted)
