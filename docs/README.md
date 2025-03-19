@@ -19,6 +19,21 @@ cd esp32-s3-box-3-minimal
 cargo run --release
 ```
 
+### ESP32-C6-LCD-1.47 Waveshare
+
+[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on 1.47 inch [ESP32-C6 LCD Waheshare](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer - [Conway's Game of Life](https://github.com/georgik/esp32-conways-game-of-life-rs/tree/main/esp32-c6-waveshare-1_47):
+
+<video src="https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76" controls width="640">
+View the video [here](https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76).
+</video>
+
+The implementation is based on Rust no\_std and Bevy 0.15 no\_std, plus mipidsi crate
+
+```
+cd esp32-c6-waveshare-1_47
+cargo run --release
+```
+
 ### ESP32-S3-BOX-3
 
 ![ESP32 Conways Game of Life in Rust - ESP32-S3-BOX-3 with Bevy ECS](esp32-s3-box-3-conway.jpg)
@@ -40,21 +55,6 @@ Build:
 
 ```
 cd esp32-s3-box-3
-cargo run --release
-```
-
-### ESP32-C6-LCD-1.47 Waveshare
-
-[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on 1.47 inch [ESP32-C6 LCD Waheshare](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer - [Conway's Game of Life](https://github.com/georgik/esp32-conways-game-of-life-rs/tree/main/esp32-c6-waveshare-1_47):
-
-<video src="https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76" controls width="640">
-View the video [here](https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76).
-</video>
-
-The implementation is based on Rust no\_std and Bevy 0.15 no\_std, plus mipidsi crate
-
-```
-cd esp32-c6-waveshare-1_47
 cargo run --release
 ```
 
@@ -82,12 +82,10 @@ python3 -m http.server
 
 This board is no longer in production, yet it's still used by many developers.
 
+![ESP32 Conways Game of Life in Rust - ESP-WROVER-KIT with Bevy ECS](esp32-wrover-kit.jpg)
+
 The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
 It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
-
-Limitation: Graphical buffer is limited to 320x100 pixels due to memory issue.
-PSRAM should work, but for some reason the buffer is not allocated there.
-Some previous examples were working with PSRAM fine, it needs further investigation
 
 Installation of the toolchain:
 

@@ -55,11 +55,51 @@ type MyDisplay = mipidsi::Display<
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
 const LCD_H_RES: usize = 320;
-const LCD_V_RES: usize = 100;
+const LCD_V_RES: usize = 240;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
+use embedded_graphics::pixelcolor::PixelColor;
+use embedded_graphics_framebuf::backends::FrameBufferBackend;
+
+/// A wrapper around a boxed array that implements FrameBufferBackend.
+/// This allows the framebuffer to be allocated on the heap.
+pub struct HeapBuffer<C: PixelColor, const N: usize>(Box<[C; N]>);
+
+impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
+    pub fn new(data: Box<[C; N]>) -> Self {
+        Self(data)
+    }
+}
+
+impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
+    type Target = [C; N];
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl<C: PixelColor, const N: usize> core::ops::DerefMut for HeapBuffer<C, N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.0
+    }
+}
+
+impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
+    type Color = C;
+    fn set(&mut self, index: usize, color: Self::Color) {
+        self.0[index] = color;
+    }
+    fn get(&self, index: usize) -> Self::Color {
+        self.0[index]
+    }
+    fn nr_elements(&self) -> usize {
+        N
+    }
+}
+
+
 // We want our pixels stored as Rgb565.
-type FbBuffer = [Rgb565; LCD_BUFFER_SIZE];
+type FbBuffer = HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
 // Define a type alias for the complete FrameBuf.
 type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
 
@@ -70,12 +110,14 @@ struct FrameBufferResource {
 
 impl FrameBufferResource {
     fn new() -> Self {
-        // Allocate the framebuffer data as an owned array of Rgb565.
-        let fb_data: FbBuffer = *Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
-        let frame_buf = MyFrameBuf::new(fb_data, LCD_H_RES, LCD_V_RES);
+        // Allocate the framebuffer data on the heap.
+        let fb_data: Box<[Rgb565; LCD_BUFFER_SIZE]> = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
+        let heap_buffer = HeapBuffer::new(fb_data);
+        let frame_buf = MyFrameBuf::new(heap_buffer, LCD_H_RES, LCD_V_RES);
         Self { frame_buf }
     }
 }
+
 
 // --- Game of Life Definitions ---
 // Now each cell is a u8 (0 means dead; >0 indicates age)
