@@ -40,11 +40,12 @@ jobs:
 
       - name: Build ESP32-C3 Project and Collect Assets
         run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall espflash
           cd "${{ github.event.inputs.board }}"
           cargo build --release
           cd ..
           mkdir -p release_riscv_imc
-          cargo install espflash
           espflash save-image --chip esp32c3 "${{ github.event.inputs.board }}/target/riscv32imc-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imc/esp32-conways-game-of-life-rs
 
       - name: Check if Release Exists
