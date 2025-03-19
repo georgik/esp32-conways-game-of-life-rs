@@ -3,10 +3,23 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release version tag (e.g. v0.5.0)'
+      release_name:
+        description: 'Name of the GitHub Release'
         required: true
         default: 'v0.5.0'
+      release_tag:
+        description: 'Tag for the GitHub Release'
+        required: true
+        default: 'v0.5.0'
+      prefix:
+        description: 'Prefix for binary name'
+        required: true
+        default: 'esp32-conways-game-of-life'
+      board:
+        description: 'Target directory for the ESP32-C3 project (e.g. esp32-c3-lcdkit)'
+        required: true
+        default: 'esp32-c6-waveshare-1_47'
+
 
 env:
   CARGO_TERM_COLOR: always
@@ -14,35 +27,59 @@ env:
 
 jobs:
 
-    riscv-imac-release:
-        name: RISC-V IMAC Release (ESP32-C6 Projects)
-        runs-on: ubuntu-latest
-        steps:
-            - name: Checkout repository
-            uses: actions/checkout@v4
+  riscv-imac-release:
+    name: RISC-V IMAC Release (ESP32-C6 Projects)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-            - name: Setup Rust for RISC-V IMAC
-            uses: actions-rs/toolchain@v1
-            with:
-                toolchain: stable
-                target: riscv32imac-unknown-none-elf
+      - name: Setup Rust for RISC-V IMAC
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: riscv32imac-unknown-none-elf
 
-            - name: Build ESP32-C6 Project and collect assets
-            run: |
-                cd esp32-c6-waveshare-1_47 && cargo build --release && cd ..
-                mkdir -p release_riscv
-                cp esp32-c6-waveshare-1_47/target/riscv32imac-unknown-none-elf/release/esp32-conways-game-of-life-rs release_riscv/
+      - name: Build ESP32-C6 Project and collect assets
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall espflash
+          cd "${{ github.event.inputs.board }}"
+          cd esp32-c6-waveshare-1_47 && cargo build --release && cd ..
+          mkdir -p release_riscv_imac
+          espflash save-image --chip esp32c3 "${{ github.event.inputs.board }}/target/riscv32imac-unknown-none-elf/release/esp32-conways-game-of-life-rs" release_riscv_imac/esp32-conways-game-of-life-rs
 
-            - name: Create GitHub Release for RISC-V
-            uses: softprops/action-gh-release@v1
-            with:
-                tag_name: ${{ github.event.inputs.version }}
-                name: "ESP32-C6 Release"
-            env:
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check if Release Exists
+        id: check_release
+        run: |
+          set +e
+          gh release view "${{ github.event.inputs.release_tag }}" > /dev/null 2>&1
+          if [ $? -eq 0 ]; then
+            echo "Release already exists."
+            echo "release_exists=true" >> $GITHUB_ENV
+          else
+            echo "Release does not exist."
+            echo "release_exists=false" >> $GITHUB_ENV
+          fi
+          set -e
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Upload RISC-V Assets
-            uses: softprops/action-gh-release@v1
-            with:
-                tag_name: ${{ github.event.inputs.version }}
-                files: release_riscv/*
+      - name: Create Release if Needed
+        if: env.release_exists == 'false'
+        run: |
+          gh release create "${{ github.event.inputs.release_tag }}" --title "${{ github.event.inputs.release_name }}" --prerelease
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload RISC-V IMAC Assets
+        run: |
+          for file in $(find release_riscv_imac -type f); do
+            base=$(basename "$file")
+            asset_name="${{ github.event.inputs.prefix }}-${{ github.event.inputs.release_tag }}-${{ github.event.inputs.board }}.bin"
+            echo "Uploading $file as $asset_name"
+            ls -l $file
+            gh release upload "${{ github.event.inputs.release_tag }}" "$file#${asset_name}" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -4,34 +4,34 @@
 extern crate alloc;
 use alloc::boxed::Box;
 
+use bevy_ecs::prelude::*;
 use core::fmt::Write;
-use embedded_hal::delay::DelayNs;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    Drawable,
+    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
-    Drawable,
 };
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_hal::delay::DelayNs;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
-use esp_hal::{
-    gpio::{Level, Output, OutputConfig},
-    rng::Rng,
-    spi::master::{Spi, SpiDmaBus},
-    Blocking,
-    main,
-    time::Rate,
-};
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
-use embedded_hal_bus::spi::ExclusiveDevice;
+use esp_hal::{
+    Blocking,
+    gpio::{Level, Output, OutputConfig},
+    main,
+    rng::Rng,
+    spi::master::{Spi, SpiDmaBus},
+    time::Rate,
+};
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::{interface::SpiInterface, options::ColorInversion};
-use mipidsi::{models::ST7789, Builder};
-use bevy_ecs::prelude::*; // includes NonSend and NonSendMut
+use mipidsi::{Builder, models::ST7789};
+use mipidsi::{interface::SpiInterface, options::ColorInversion}; // includes NonSend and NonSendMut
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -45,10 +45,10 @@ type MyDisplay = mipidsi::Display<
     SpiInterface<
         'static,
         ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
-        Output<'static>
+        Output<'static>,
     >,
     ST7789,
-    Output<'static>
+    Output<'static>,
 >;
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
@@ -100,7 +100,9 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
             let mut alive_neighbors = 0;
             for i in 0..3 {
                 for j in 0..3 {
-                    if i == 1 && j == 1 { continue; }
+                    if i == 1 && j == 1 {
+                        continue;
+                    }
                     let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
                     let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
                     if grid[ny][nx] > 0 {
@@ -128,7 +130,7 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     *grid = new_grid;
 }
 
-/// Maps cell age (1..=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
+/// Maps cell age (1...=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
 fn age_to_color(age: u8) -> Rgb565 {
     if age == 0 {
         Rgb565::BLACK
@@ -312,11 +314,7 @@ fn main() -> ! {
     display_delay.delay_ns(500_000u32);
 
     // Reset pin: GPIO21 (active low per BSP).
-    let reset = Output::new(
-        peripherals.GPIO21,
-        Level::Low,
-        OutputConfig::default(),
-    );
+    let reset = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default());
     // Initialize the display using mipidsi's builder.
     let mut display: MyDisplay = Builder::new(ST7789, di)
         .reset_pin(reset)
