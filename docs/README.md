@@ -78,4 +78,30 @@ wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/co
 python3 -m http.server
 ```
 
+### ESP32-WROVER-KIT
+
+This board is no longer in production, yet it's still used by many developers.
+
+The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
+
+Limitation: Graphical buffer is limited to 320x100 pixels due to memory issue.
+PSRAM should work, but for some reason the buffer is not allocated there.
+Some previous examples were working with PSRAM fine, it needs further investigation
+
+Installation of the toolchain:
+
+```
+cargo install espup
+espup install --toolchain-version 1.85.0.0
+source ~/export-esp.sh
+```
+
+Build:
+
+```
+cd esp32-wrover-kit
+cargo run --release
+```
+
 
