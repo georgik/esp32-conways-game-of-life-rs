@@ -1,9 +1,9 @@
-name: CI RISC-V IMC
+name: CI RISC-V IMAC
 
 on:
   push:
     paths:
-      - "esp32-c3-lcdkit/**"
+      - "esp32-c6-waveshare-1_47/**"
   workflow_dispatch:
     inputs:
       release_name:
@@ -19,29 +19,29 @@ on:
         required: true
         default: 'esp32-conways-game-of-life'
       board:
-        description: 'Target directory for the ESP32-C3 project (e.g. esp32-c3-lcdkit)'
+        description: 'Target directory for the ESP32-C6 project (e.g. esp32-c6-waveshare-1_47)'
         required: true
-        default: 'esp32-c3-lcdkit'
+        default: 'esp32-c6-waveshare-1_47'
 
 env:
-    CARGO_TERM_COLOR: always
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   riscv-imc-release:
-    name: RISC-V IMC CI (ESP32-C3 Projects)
+    name: RISC-V IMAC CI (ESP32-C6 Projects)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Rust for RISC-V IMC
+      - name: Setup Rust for RISC-V IMAC
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: riscv32imc-unknown-none-elf
+          target: riscv32imac-unknown-none-elf
 
-      - name: Build ESP32-C3 Project and Collect Assets
+      - name: Build ESP32-C6 Project and Collect Assets
         run: |
           cd "${{ github.event.inputs.board }}"
           cargo build --release
