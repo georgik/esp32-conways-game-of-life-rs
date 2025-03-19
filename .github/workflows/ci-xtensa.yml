@@ -1,4 +1,4 @@
-name: Release Xtensa
+name: CI Xtensa
 
 on:
   push:

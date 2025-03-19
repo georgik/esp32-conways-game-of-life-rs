@@ -55,28 +55,20 @@ jobs:
 
       - name: Build Xtensa Projects, Create Flashable Images, and Collect Assets
         run: |
+          mkdir -p release_xtensa
+
           # Build the box project.
           cd "${{ github.event.inputs.target_box }}"
           cargo build --release
           # Create flashable image for the box project.
-          espflash save-image --output flash_image_box.bin target/xtensa-esp32s3-none-elf/release/esp32-conways-game-of-life-rs
           cd ..
           # Build the minimal project.
           cd "${{ github.event.inputs.target_minimal }}"
           cargo build --release
           # Create flashable image for the minimal project.
-          espflash save-image --output flash_image_minimal.bin target/xtensa-esp32s3-none-elf/release/esp32-conways-game-of-life-rs-minimal
           cd ..
-          # Create a folder to collect assets.
-          mkdir -p release_xtensa
-          cp "${{ github.event.inputs.target_box }}/flash_image_box.bin" release_xtensa/
-          cp "${{ github.event.inputs.target_minimal }}/flash_image_minimal.bin" release_xtensa/
-
-      - name: Install GitHub CLI
-        run: sudo apt-get install -y gh
-
-      - name: Authenticate GitHub CLI
-        run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+          espflash save-image "${{ github.event.inputs.target_box }}/target/xtensa-esp32s3-none-elf/release/esp32-conways-game-of-life-rs" release_xtensa/esp32-conways-game-of-life-rs-${{ github.event.inputs.target_box }}
+          espflash save-image "${{ github.event.inputs.target_minimal }}/target/xtensa-esp32s3-none-elf/release/esp32-conways-game-of-life-rs-minimal" release_xtensa/esp32-conways-game-of-life-rs-${{ github.event.inputs.target_minimal }}
 
       - name: Check if Release Exists
         id: check_release
