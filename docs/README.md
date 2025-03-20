@@ -60,7 +60,7 @@ cargo run --release
 
 ### ESP32-C3-LCDKit
 
-Limitation: Framebuffer fits only to 240x190 pixels. Might be cause by allocation on stack instead of heap.
+![ESP32 Conways Game of Life in Rust - ESP32-C3-LCDkit with Bevy ECS](esp32-c3-ldckit-conway.jpg)
 
 ```
 cd esp32-c3-lcdkit
