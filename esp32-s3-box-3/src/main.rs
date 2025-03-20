@@ -3,40 +3,80 @@
 
 extern crate alloc;
 use alloc::boxed::Box;
+use embedded_graphics_framebuf::backends::FrameBufferBackend;
 
+use bevy_ecs::prelude::*;
 use core::fmt::Write;
-use embedded_hal::delay::DelayNs;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    Drawable,
+    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
-    Drawable,
 };
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_hal::delay::DelayNs;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
-use esp_hal::{
-    gpio::{Level, Output, OutputConfig, DriveMode},
-    rng::Rng,
-    spi::master::{Spi, SpiDmaBus},
-    Blocking,
-    main,
-    time::Rate,
-};
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
-use embedded_hal_bus::spi::ExclusiveDevice;
+use esp_hal::{
+    Blocking,
+    gpio::{DriveMode, Level, Output, OutputConfig},
+    main,
+    rng::Rng,
+    spi::master::{Spi, SpiDmaBus},
+    time::Rate,
+};
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::{interface::SpiInterface, options::{ColorInversion, Orientation, ColorOrder}};
-use mipidsi::{models::ILI9486Rgb565, Builder};
-use bevy_ecs::prelude::*; // includes NonSend and NonSendMut
+use mipidsi::{Builder, models::ILI9486Rgb565};
+use mipidsi::{
+    interface::SpiInterface,
+    options::{ColorInversion, ColorOrder, Orientation},
+}; // includes NonSend and NonSendMut
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     println!("Panic: {}", _info);
     loop {}
+}
+
+/// A wrapper around a boxed array that implements FrameBufferBackend.
+/// This allows the framebuffer to be allocated on the heap.
+pub struct HeapBuffer<C: PixelColor, const N: usize>(Box<[C; N]>);
+
+impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
+    pub fn new(data: Box<[C; N]>) -> Self {
+        Self(data)
+    }
+}
+
+impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
+    type Target = [C; N];
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl<C: PixelColor, const N: usize> core::ops::DerefMut for HeapBuffer<C, N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.0
+    }
+}
+
+impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
+    type Color = C;
+    fn set(&mut self, index: usize, color: Self::Color) {
+        self.0[index] = color;
+    }
+    fn get(&self, index: usize) -> Self::Color {
+        self.0[index]
+    }
+    fn nr_elements(&self) -> usize {
+        N
+    }
 }
 
 // --- Type Alias for the Concrete Display ---
@@ -45,10 +85,10 @@ type MyDisplay = mipidsi::Display<
     SpiInterface<
         'static,
         ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
-        Output<'static>
+        Output<'static>,
     >,
     ILI9486Rgb565,
-    Output<'static>
+    Output<'static>,
 >;
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
@@ -57,7 +97,7 @@ const LCD_V_RES: usize = 240;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
 // We want our pixels stored as Rgb565.
-type FbBuffer = [Rgb565; LCD_BUFFER_SIZE];
+type FbBuffer = HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
 // Define a type alias for the complete FrameBuf.
 type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
 
@@ -68,9 +108,10 @@ struct FrameBufferResource {
 
 impl FrameBufferResource {
     fn new() -> Self {
-        // Allocate the framebuffer data as an owned array of Rgb565.
-        let fb_data: FbBuffer = *Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
-        let frame_buf = MyFrameBuf::new(fb_data, LCD_H_RES, LCD_V_RES);
+        // Allocate the framebuffer data on the heap.
+        let fb_data: Box<[Rgb565; LCD_BUFFER_SIZE]> = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
+        let heap_buffer = HeapBuffer::new(fb_data);
+        let frame_buf = MyFrameBuf::new(heap_buffer, LCD_H_RES, LCD_V_RES);
         Self { frame_buf }
     }
 }
@@ -100,7 +141,9 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
             let mut alive_neighbors = 0;
             for i in 0..3 {
                 for j in 0..3 {
-                    if i == 1 && j == 1 { continue; }
+                    if i == 1 && j == 1 {
+                        continue;
+                    }
                     let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
                     let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
                     if grid[ny][nx] > 0 {
@@ -128,7 +171,7 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     *grid = new_grid;
 }
 
-/// Maps cell age (1..=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
+/// Maps cell age (1...=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
 fn age_to_color(age: u8) -> Rgb565 {
     if age == 0 {
         Rgb565::BLACK
@@ -315,7 +358,11 @@ fn main() -> ! {
     display_delay.delay_ns(500_000u32);
 
     // Reset pin: OpenDrain required for ESP32-S3-BOX! Tricky setting.
-    let reset = Output::new(peripherals.GPIO48, Level::High, OutputConfig::default().with_drive_mode(DriveMode::OpenDrain));
+    let reset = Output::new(
+        peripherals.GPIO48,
+        Level::High,
+        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
+    );
     // Initialize the display using mipidsi's builder.
     let mut display: MyDisplay = Builder::new(ILI9486Rgb565, di)
         .reset_pin(reset)

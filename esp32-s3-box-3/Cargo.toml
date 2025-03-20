@@ -1,8 +1,8 @@
 [package]
 name = "esp32-conways-game-of-life-rs"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Juraj Michálek <juraj.michalek@espressif.com>"]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 
 
