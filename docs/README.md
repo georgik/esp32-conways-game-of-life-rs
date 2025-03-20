@@ -60,7 +60,7 @@ cargo run --release
 
 ### ESP32-C3-LCDKit
 
-![ESP32 Conways Game of Life in Rust - ESP32-C3-LCDkit with Bevy ECS](esp32-c3-ldckit-conway.jpg)
+![ESP32 Conways Game of Life in Rust - ESP32-C3-LCDkit with Bevy ECS](esp32-c3-lcdkit-conway.jpg)
 
 ```
 cd esp32-c3-lcdkit
