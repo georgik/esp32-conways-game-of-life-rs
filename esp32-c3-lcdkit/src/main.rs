@@ -31,7 +31,7 @@ use esp_hal::{
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
 use mipidsi::options::{ColorOrder, Orientation};
-use mipidsi::{Builder, models::ILI9341Rgb565};
+use mipidsi::{Builder, models::GC9A01};
 use mipidsi::{interface::SpiInterface, options::ColorInversion};
 // includes NonSend and NonSendMut
 
@@ -49,7 +49,7 @@ type MyDisplay = mipidsi::Display<
         ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
         Output<'static>,
     >,
-    ILI9341Rgb565,
+    GC9A01,
     Output<'static>,
 >;
 
@@ -317,10 +317,10 @@ fn main() -> ! {
     // Reset pin
     let reset = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default());
     // Initialize the display using mipidsi's builder.
-    let mut display: MyDisplay = Builder::new(ILI9341Rgb565, di)
+    let mut display: MyDisplay = Builder::new(GC9A01, di)
         .reset_pin(reset)
         .display_size(240, 240)
-        .orientation(Orientation::new().flip_horizontal())
+        // .orientation(Orientation::new().flip_horizontal())
         .color_order(ColorOrder::Bgr)
         .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)
