@@ -92,8 +92,8 @@ type MyDisplay = mipidsi::Display<
 >;
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
-const LCD_H_RES: usize = 128;
-const LCD_V_RES: usize = 128;
+const LCD_H_RES: usize = 130;
+const LCD_V_RES: usize = 129;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
 // We want our pixels stored as Rgb565.
@@ -363,7 +363,7 @@ fn main() -> ! {
     // Initialize the display using mipidsi's builder.
     let mut display: MyDisplay = Builder::new(GC9A01, di)
         .reset_pin(reset)
-        .display_size(128, 128)
+        .display_size(130, 129)
         // .orientation(Orientation::new().flip_horizontal())
         .color_order(ColorOrder::Bgr)
         .invert_colors(ColorInversion::Inverted)

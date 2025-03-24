@@ -34,6 +34,30 @@ cd esp32-c6-waveshare-1_47
 cargo run --release
 ```
 
+### M5Stack Atom-S3
+
+![ESP32 Conways Game of Life in Rust - M5Stack Atom-S3 with Bevy ECS](m5stack-atom-s3.jpg)
+
+- https://docs.m5stack.com/en/core/AtomS3
+
+The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
+
+Installation of the toolchain:
+
+```
+cargo install espup
+espup install --toolchain-version 1.85.0.0
+source ~/export-esp.sh
+```
+
+Build:
+
+```
+cd m5stack-atom-s3
+cargo run --release
+```
+
 ### ESP32-S3-BOX-3
 
 ![ESP32 Conways Game of Life in Rust - ESP32-S3-BOX-3 with Bevy ECS](esp32-s3-box-3-conway.jpg)
