@@ -31,7 +31,7 @@ use esp_hal::{
 };
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::{Builder, models::GC9107};
+use mipidsi::{Builder, models::GC9A01};
 use mipidsi::{
     interface::SpiInterface,
     options::{ColorInversion, ColorOrder, Orientation},
@@ -87,7 +87,7 @@ type MyDisplay = mipidsi::Display<
         ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
         Output<'static>,
     >,
-    GC9107,
+    GC9A01,
     Output<'static>,
 >;
 
@@ -283,13 +283,13 @@ fn render_system(
     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
 
     // --- Overlay centered text ---
-    let line1 = "Rust no_std ESP32-S3";
-    let line2 = "Bevy ECS 0.15 no_std";
+    let line1 = "Rust - ATOM-S3";
+    let line2 = "Bevy ECS no_std";
     // Estimate text width: assume ~8 pixels per character.
     let line1_width = line1.len() as i32 * 8;
     let line2_width = line2.len() as i32 * 8;
-    let x1 = (LCD_H_RES as i32 - line1_width) / 2 + 14;
-    let x2 = (LCD_H_RES as i32 - line2_width) / 2 + 14;
+    let x1 = (LCD_H_RES as i32 - line1_width) / 2;
+    let x2 = (LCD_H_RES as i32 - line2_width) / 2;
     // For vertical centering, assume 26 pixels total text height.
     let y = (LCD_V_RES as i32 - 26) / 2;
     Text::new(
@@ -346,7 +346,7 @@ fn main() -> ! {
     let spi_delay = Delay::new();
     let spi_device = ExclusiveDevice::new(spi, cs_output, spi_delay).unwrap();
 
-    // LCD interface: DC = GPIO4.
+    // LCD interface: DC.
     let lcd_dc = Output::new(peripherals.GPIO33, Level::Low, OutputConfig::default());
     // Leak a Box to obtain a 'static mutable buffer.
     let buffer: &'static mut [u8; 512] = Box::leak(Box::new([0_u8; 512]));
@@ -355,19 +355,18 @@ fn main() -> ! {
     let mut display_delay = Delay::new();
     display_delay.delay_ns(500_000u32);
 
-    // Reset pin: OpenDrain required for ESP32-S3-BOX! Tricky setting.
     let reset = Output::new(
         peripherals.GPIO34,
         Level::High,
-        OutputConfig::default()/*.with_drive_mode(DriveMode::OpenDrain)*/,
+        OutputConfig::default(),
     );
     // Initialize the display using mipidsi's builder.
-    let mut display: MyDisplay = Builder::new(GC9107, di)
+    let mut display: MyDisplay = Builder::new(GC9A01, di)
         .reset_pin(reset)
         .display_size(128, 128)
         // .orientation(Orientation::new().flip_horizontal())
         .color_order(ColorOrder::Bgr)
-        // .invert_colors(ColorInversion::Inverted)
+        .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)
         .unwrap();
 
