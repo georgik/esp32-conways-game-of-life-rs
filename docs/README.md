@@ -40,6 +40,8 @@ cargo run --release
 
 - https://docs.m5stack.com/en/core/AtomS3
 
+Controls: Press button under display to reset the game state (GPIO 41).
+
 The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
 It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
 

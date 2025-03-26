@@ -23,7 +23,7 @@ use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::{
     Blocking,
-    gpio::{DriveMode, Level, Output, OutputConfig},
+    gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
@@ -256,6 +256,16 @@ struct DisplayResource {
     display: MyDisplay,
 }
 
+struct ButtonResource {
+    button: Input<'static>,
+}
+
+/// Resource to track the previous state of the button (for edge detection).
+#[derive(Default, Resource)]
+struct ButtonState {
+    was_pressed: bool,
+}
+
 fn update_game_of_life_system(
     mut game: ResMut<GameOfLifeResource>,
     mut rng_res: ResMut<RngResource>,
@@ -265,6 +275,26 @@ fn update_game_of_life_system(
     if game.generation >= RESET_AFTER_GENERATIONS {
         randomize_grid(&mut rng_res.0, &mut game.grid);
         game.generation = 0;
+    }
+}
+
+/// System to check the button and reset the simulation when pressed.
+fn button_reset_system(
+    mut game: ResMut<GameOfLifeResource>,
+    mut rng_res: ResMut<RngResource>,
+    mut btn_state: ResMut<ButtonState>,
+    button_res: NonSend<ButtonResource>,
+) {
+    // Check if the button is pressed (active low)
+    if button_res.button.is_low() {
+        if !btn_state.was_pressed {
+            // Button press detected: reset simulation.
+            randomize_grid(&mut rng_res.0, &mut game.grid);
+            game.generation = 0;
+            btn_state.was_pressed = true;
+        }
+    } else {
+        btn_state.was_pressed = false;
     }
 }
 
@@ -355,11 +385,7 @@ fn main() -> ! {
     let mut display_delay = Delay::new();
     display_delay.delay_ns(500_000u32);
 
-    let reset = Output::new(
-        peripherals.GPIO34,
-        Level::High,
-        OutputConfig::default(),
-    );
+    let reset = Output::new(peripherals.GPIO34, Level::High, OutputConfig::default());
     // Initialize the display using mipidsi's builder.
     let mut display: MyDisplay = Builder::new(GC9A01, di)
         .reset_pin(reset)
@@ -398,7 +424,20 @@ fn main() -> ! {
     // Insert the framebuffer resource as a normal resource.
     world.insert_resource(fb_res);
 
+    // --- Initialize Button Resource ---
+    // Configure the button as an input with an internal pull-up (active low).
+    let button = Input::new(
+        peripherals.GPIO41,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+    world.insert_non_send_resource(ButtonResource { button });
+    // Insert a resource to track button state for debouncing.
+    world.insert_resource(ButtonState::default());
+
+    // --- Build ECS Schedule ---
+    // We add the button system so that a button press resets the simulation.
     let mut schedule = Schedule::default();
+    schedule.add_systems(button_reset_system);
     schedule.add_systems(update_game_of_life_system);
     schedule.add_systems(render_system);
 
