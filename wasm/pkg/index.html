@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Conway's Game of Life - WASM</title>
+  <style>
+    body { margin: 0; background: #000; }
+    canvas { display: block; margin: auto; }
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<!-- Import the wasm-bindgen generated JS module -->
+<script type="module">
+  import init from "./conways_wasm.js";
+  async function run() {
+    // Initialize the WASM module (it will automatically look for the .wasm file in the same directory)
+    await init();
+  }
+  run();
+</script>
+</body>
+</html>
