@@ -22,7 +22,7 @@ use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::{
     Blocking,
-    gpio::{Level, Output, OutputConfig},
+    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
@@ -30,7 +30,7 @@ use esp_hal::{
 };
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::options::{ColorOrder, Orientation};
+use mipidsi::options::ColorOrder;
 use mipidsi::{Builder, models::GC9A01};
 use mipidsi::{interface::SpiInterface, options::ColorInversion};
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
@@ -217,11 +217,14 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     generation: usize,
 ) -> Result<(), D::Error> {
+    let x = 70;
+    let y = 140;
+
     let mut num_str = heapless::String::<20>::new();
-    write!(num_str, "{}", generation).unwrap();
+    write!(num_str, "Generation: {}", generation).unwrap();
     Text::new(
         num_str.as_str(),
-        Point::new(8, 13),
+        Point::new(x, y),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
     .draw(display)?;
@@ -254,6 +257,16 @@ struct DisplayResource {
     display: MyDisplay,
 }
 
+struct ButtonResource {
+    button: Input<'static>,
+}
+
+/// Resource to track the previous state of the button (for edge detection).
+#[derive(Default, Resource)]
+struct ButtonState {
+    was_pressed: bool,
+}
+
 fn update_game_of_life_system(
     mut game: ResMut<GameOfLifeResource>,
     mut rng_res: ResMut<RngResource>,
@@ -263,6 +276,26 @@ fn update_game_of_life_system(
     if game.generation >= RESET_AFTER_GENERATIONS {
         randomize_grid(&mut rng_res.0, &mut game.grid);
         game.generation = 0;
+    }
+}
+
+/// System to check the button and reset the simulation when pressed.
+fn button_reset_system(
+    mut game: ResMut<GameOfLifeResource>,
+    mut rng_res: ResMut<RngResource>,
+    mut btn_state: ResMut<ButtonState>,
+    button_res: NonSend<ButtonResource>,
+) {
+    // Check if the button is pressed (active low)
+    if button_res.button.is_low() {
+        if !btn_state.was_pressed {
+            // Button press detected: reset simulation.
+            randomize_grid(&mut rng_res.0, &mut game.grid);
+            game.generation = 0;
+            btn_state.was_pressed = true;
+        }
+    } else {
+        btn_state.was_pressed = false;
     }
 }
 
@@ -282,7 +315,7 @@ fn render_system(
 
     // --- Overlay centered text ---
     let line1 = "Rust no_std ESP32-C3";
-    let line2 = "Bevy ECS 0.15 no_std";
+    let line2 = "Bevy ECS 0.16 no_std";
     // Estimate text width: assume ~8 pixels per character.
     let line1_width = line1.len() as i32 * 8;
     let line2_width = line2.len() as i32 * 8;
@@ -391,7 +424,18 @@ fn main() -> ! {
     // Insert the framebuffer resource as a normal resource.
     world.insert_resource(fb_res);
 
+    // --- Initialize Button Resource ---
+    // Configure the button as an input with an internal pull-up (active low).
+    let button = Input::new(
+        peripherals.GPIO9,
+        InputConfig::default().with_pull(Pull::Up),
+    );
+    world.insert_non_send_resource(ButtonResource { button });
+    // Insert a resource to track button state for debouncing.
+    world.insert_resource(ButtonState::default());
+
     let mut schedule = Schedule::default();
+    schedule.add_systems(button_reset_system);
     schedule.add_systems(update_game_of_life_system);
     schedule.add_systems(render_system);
 

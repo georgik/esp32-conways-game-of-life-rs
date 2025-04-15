@@ -88,6 +88,8 @@ cargo run --release
 
 ![ESP32 Conways Game of Life in Rust - ESP32-C3-LCDkit with Bevy ECS](esp32-c3-lcdkit-conway.jpg)
 
+Controls: Press button rotary button to reset the game state (GPIO 9).
+
 ```
 cd esp32-c3-lcdkit
 cargo run --release
