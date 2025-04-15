@@ -18,10 +18,6 @@ on:
         description: 'Prefix for binary name'
         required: true
         default: 'esp32-conways-game-of-life'
-      board:
-        description: 'Target directory for the ESP32-C3 project (e.g. esp32-c3-lcdkit)'
-        required: true
-        default: 'esp32-c3-lcdkit'
 
 env:
     CARGO_TERM_COLOR: always
@@ -43,7 +39,7 @@ jobs:
 
       - name: Build ESP32-C3 Project and Collect Assets
         run: |
-          cd "${{ github.event.inputs.board }}"
+          cd "esp32-c3-lcdkit"
           cargo build --release
           cargo fmt --all -- --check --color always
           cargo clippy --all-features --workspace -- -D warnings
