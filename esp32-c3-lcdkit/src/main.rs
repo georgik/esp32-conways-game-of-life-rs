@@ -15,6 +15,7 @@ use embedded_graphics::{
     text::Text,
 };
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
@@ -33,7 +34,6 @@ use log::info;
 use mipidsi::options::ColorOrder;
 use mipidsi::{Builder, models::GC9A01};
 use mipidsi::{interface::SpiInterface, options::ColorInversion};
-use embedded_graphics_framebuf::backends::FrameBufferBackend;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
