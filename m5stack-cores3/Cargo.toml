@@ -1,0 +1,39 @@
+[package]
+name = "esp32-conways-game-of-life-rs"
+version = "0.6.0"
+authors = ["Juraj Michálek <juraj.michalek@espressif.com>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+
+[dependencies]
+esp-hal = { version = "1.0.0-beta.0", features = ["esp32s3", "unstable"] }
+esp-backtrace = { version = "0.15.1", features = [
+    "panic-handler",
+    "println"
+] }
+esp-println = { version = "0.13", features = [ "log" ] }
+log = { version = "0.4.26" }
+
+esp-alloc = "0.7.0"
+embedded-graphics = "0.8.1"
+embedded-hal = "1.0.0"
+mipidsi = "0.9.0"
+embedded-graphics-framebuf = "0.5.0"
+heapless = "0.8.0"
+embedded-hal-bus = "0.3.0"
+
+# M5Stack specific
+# Power Management IC
+axp2101 = { git = "https://github.com/georgik/axp2101-rs.git", tag = "v0.2.0" }
+# GPIO Expander
+aw9523 = { git = "https://github.com/georgik/aw9523-rs.git", tag = "v0.2.0" }
+
+bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "301f618", default-features = false }
+
+
+[features]
+default = [ "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3", "esp32-s3-box-3" ]
+
+# esp32-s3-box-3 = [ "esp-bsp/esp32-s3-box-3", "esp-hal/psram" ]
+esp32-s3-box-3 = [ "esp-hal/psram" ]
