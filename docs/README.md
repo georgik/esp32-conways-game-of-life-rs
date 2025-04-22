@@ -60,6 +60,32 @@ cd m5stack-atom-s3
 cargo run --release
 ```
 
+### M5Stack CoreS3
+
+![ESP32 Conways Game of Life in Rust - M5Stack CoreS3 with Bevy ECS](m5stack-cores3-conway.jpg)
+
+- https://shop.m5stack.com/products/m5stack-cores3-esp32s3-lotdevelopment-kit
+
+Controls: Press the button under display to reset the game state.
+
+Note: Press Boot button and reset to enter download mode.
+
+The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+
+Installation of the toolchain:
+
+```
+espup install --toolchain-version 1.85.0.0
+source ~/export-esp.sh
+```
+
+Build:
+
+```
+cd m5stack-cores3
+cargo run --release
+```
+
 ### ESP32-S3-BOX-3
 
 ![ESP32 Conways Game of Life in Rust - ESP32-S3-BOX-3 with Bevy ECS](esp32-s3-box-3-conway.jpg)
