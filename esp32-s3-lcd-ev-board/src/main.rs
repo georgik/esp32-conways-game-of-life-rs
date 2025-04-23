@@ -100,25 +100,20 @@ impl<Dm: esp_hal::DriverMode> IOExpander<Dm> {
     }
 
     fn init(&mut self) -> Result<(), I2cError> {
-        let mut buffer = [0u8];
 
-        self.i2c.write_read(
-            self.address,
-            &[Self::REG_INPUT_PORT],
-            &mut buffer
-        )?;
+        let config_mask = !(
+            (1 << Self::BSP_LCD_SUB_BOARD_2_SPI_CS) |
+                (1 << Self::BSP_LCD_SUB_BOARD_2_SPI_SCK) |
+                (1 << Self::BSP_LCD_SUB_BOARD_2_SPI_SDO)
+        );
 
-        // Configure all pins as outputs (0 = output, 1 = input for TCA9554)
-        self.i2c.write(
-            self.address,
-            &[Self::REG_CONFIG, 0x00]  // Set all pins as outputs
-        )?;
+        let write_buf = [Self::REG_CONFIG, config_mask];
+        self.i2c.write(self.address, &write_buf)?;
 
-        // Default output state - all pins high
-        self.i2c.write(
-            self.address,
-            &[Self::REG_OUTPUT_PORT, 0xFF]  // Set all pins high
-        )?;
+        // Set initial state - CS high, SCK and MOSI low
+        self.set_pin(Self::BSP_LCD_SUB_BOARD_2_SPI_CS, true)?;
+        self.set_pin(Self::BSP_LCD_SUB_BOARD_2_SPI_SCK, false)?;
+        self.set_pin(Self::BSP_LCD_SUB_BOARD_2_SPI_SDO, false)?;
 
         Ok(())
     }
@@ -143,6 +138,7 @@ impl<Dm: esp_hal::DriverMode> IOExpander<Dm> {
         // Write back the updated state
         let write_buf = [Self::REG_OUTPUT_PORT, output_state];
         self.i2c.write(self.address, &write_buf)
+
     }
 }
 
@@ -263,6 +259,7 @@ impl RGB16BitInterface {
             data_pins,
         }
     }
+    
 
     // Send a pixel to the display
     fn send_pixel(&mut self, color: Rgb565) -> Result<(), ()> {
@@ -1007,8 +1004,47 @@ fn main() -> ! {
     display.clear(Rgb565::BLUE).expect("Failed to clear display");
 
     info!("Display initialized");
+
+    info!("Starting display diagnostic test");
+
+    // Test pattern 1: Full screen colors in sequence
+    let colors = [
+        Rgb565::RED,
+        Rgb565::GREEN,
+        Rgb565::BLUE,
+        Rgb565::WHITE,
+        Rgb565::MAGENTA,
+        Rgb565::CYAN,
+        Rgb565::YELLOW,
+    ];
+
+    let mut delay = Delay::new();
+    info!("Drawing full screen color test pattern");
+    for (i, &color) in colors.iter().enumerate() {
+        info!("Filling screen with color #{}", i);
+        display.clear(color);
+        delay.delay_ns(500_000u32);
+    }
+
+    // Test pattern 2: Vertical bars
+    info!("Drawing vertical color bars");
+    let bar_width = 320 / colors.len() as u16;
+    for (i, &color) in colors.iter().enumerate() {
+        let x = i as u16 * bar_width;
+        let rectangle = Rectangle::new(
+            Point::new(x as i32, 0),
+            Size::new(bar_width as u32, 480)
+        );
+        display.fill_solid(&rectangle, color);
+    }
+    delay.delay_ms(1000u32);
+
+   
+    delay.delay_ms(1000u32);
+    info!("Display diagnostic test completed");
+
     loop {
-        
+
     }
 
     // --- Initialize Game Resources ---
