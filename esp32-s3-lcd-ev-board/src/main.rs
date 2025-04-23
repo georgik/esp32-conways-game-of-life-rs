@@ -280,8 +280,8 @@ impl RGB16BitInterface {
         }
 
         // Pulse PCLK to latch the data
-        self.pclk.set_high();
         self.pclk.set_low();
+        self.pclk.set_high();
 
         Ok(())
     }
@@ -289,7 +289,7 @@ impl RGB16BitInterface {
     // Set up for a frame transfer
     fn start_frame(&mut self) -> Result<(), ()> {
         self.vsync.set_high();
-        self.hsync.set_low();
+        self.hsync.set_high();
         self.de.set_low();
         Ok(())
     }
@@ -304,7 +304,7 @@ impl RGB16BitInterface {
     // End a line
     fn end_line(&mut self) -> Result<(), ()> {
         self.hsync.set_low();
-        self.de.set_low();
+        // self.de.set_low();
         Ok(())
     }
 
@@ -332,7 +332,6 @@ impl<Dm: esp_hal::DriverMode> GC9503Display<Dm> {
             height,
         }
     }
-
     fn init(&mut self, delay: &mut impl DelayNs) -> Result<(), I2cError> {
         // Initialize the SPI interface
         self.spi.init()?;
@@ -378,7 +377,7 @@ impl<Dm: esp_hal::DriverMode> GC9503Display<Dm> {
 
         // Pixel format
         self.spi.send_command(0x3A)?;
-        self.spi.send_data(0x55)?; // 16-bit color
+        self.spi.send_data(0x55)?; // 16-bit color (RGB565)
 
         // Gamma correction - from ESP-BSP implementation
         self.spi.send_command(0xE0)?;
@@ -430,7 +429,7 @@ impl<Dm: esp_hal::DriverMode> GC9503Display<Dm> {
         for _ in 0..y {
             self.rgb_interface.start_line()?;
             for _ in 0..self.width {
-                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                self.rgb_interface.send_pixel(Rgb565::RED)?;
             }
             self.rgb_interface.end_line()?;
         }
@@ -441,7 +440,7 @@ impl<Dm: esp_hal::DriverMode> GC9503Display<Dm> {
 
             // Skip pixels before x
             for _ in 0..x {
-                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                self.rgb_interface.send_pixel(Rgb565::GREEN)?;
             }
 
             // Draw actual pixels from buffer
@@ -451,13 +450,13 @@ impl<Dm: esp_hal::DriverMode> GC9503Display<Dm> {
                 if buffer_idx < buffer.len() {
                     self.rgb_interface.send_pixel(buffer[buffer_idx])?;
                 } else {
-                    self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                    self.rgb_interface.send_pixel(Rgb565::BLUE)?;
                 }
             }
 
             // Fill remaining pixels in the line
             for _ in end_x..self.width {
-                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                self.rgb_interface.send_pixel(Rgb565::YELLOW)?;
             }
 
             self.rgb_interface.end_line()?;
@@ -467,7 +466,7 @@ impl<Dm: esp_hal::DriverMode> GC9503Display<Dm> {
         for _ in end_y..self.height {
             self.rgb_interface.start_line()?;
             for _ in 0..self.width {
-                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                self.rgb_interface.send_pixel(Rgb565::WHITE)?;
             }
             self.rgb_interface.end_line()?;
         }
@@ -889,7 +888,7 @@ fn render_system(
     mut fb_res: ResMut<FrameBufferResource>,
 ) {
     // Clear the framebuffer.
-    fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
+    fb_res.frame_buf.clear(Rgb565::BLUE).unwrap();
     // Draw the game grid (using the age-based color) and generation number.
     draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
@@ -1008,6 +1007,9 @@ fn main() -> ! {
     display.clear(Rgb565::BLUE).expect("Failed to clear display");
 
     info!("Display initialized");
+    loop {
+        
+    }
 
     // --- Initialize Game Resources ---
     let mut game = GameOfLifeResource::default();
