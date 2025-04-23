@@ -20,13 +20,13 @@ use embedded_graphics_framebuf::FrameBuf;
 use embedded_hal::delay::DelayNs;
 use esp_hal::delay::Delay;
 use esp_hal::{gpio::{Level, Output, OutputConfig}, i2c::master::I2c, i2c::master::Error as I2cError, main, rng::Rng, Blocking};
+use esp_hal::i2c::master::BusTimeout;
+use esp_hal::time::Rate;
 use esp_println::{logger::init_logger_from_env, println};
-use log::info;
-use mipidsi::{Builder, models::GC9503CV};
-use mipidsi::{
-    options::ColorOrder,
-};
-use mipidsi::interface::{Generic8BitBus, ParallelInterface};
+use log::{ info, error };
+// use mipidsi::models::GC9503CV;
+
+// use mipidsi::interface::{Generic8BitBus, ParallelInterface};
 // includes NonSend and NonSendMut
 
 #[panic_handler]
@@ -79,21 +79,18 @@ struct IOExpander<Dm: esp_hal::DriverMode> {
 }
 
 
+// In your IOExpander struct implementation:
 impl<Dm: esp_hal::DriverMode> IOExpander<Dm> {
-    // TCA9554 IO Expander address
     const BSP_IO_EXPANDER_I2C_ADDRESS: u8 = 0x20;
 
-    // Registers for TCA9554
-    // These constants are correct according to the C code
     const REG_INPUT_PORT: u8 = 0x00;
     const REG_OUTPUT_PORT: u8 = 0x01;
-    const REG_POLARITY_INVERSION: u8 = 0x02;
     const REG_CONFIG: u8 = 0x03;
 
+    // LCD sub-board control signals
     const BSP_LCD_SUB_BOARD_2_SPI_CS: u8 = 1;
     const BSP_LCD_SUB_BOARD_2_SPI_SCK: u8 = 2;
     const BSP_LCD_SUB_BOARD_2_SPI_SDO: u8 = 3;
-
 
     fn new(i2c: I2c<'static, Dm>) -> Self {
         Self {
@@ -103,23 +100,32 @@ impl<Dm: esp_hal::DriverMode> IOExpander<Dm> {
     }
 
     fn init(&mut self) -> Result<(), I2cError> {
-        // Configure pins 1, 2, 3 as outputs (0 = output, 1 = input)
-        let config = 0xFF & !(1 << Self::BSP_LCD_SUB_BOARD_2_SPI_CS |
-            1 << Self::BSP_LCD_SUB_BOARD_2_SPI_SCK |
-            1 << Self::BSP_LCD_SUB_BOARD_2_SPI_SDO);
+        let mut buffer = [0u8];
 
-        let mut write_buf = [Self::REG_CONFIG, config];
-        self.i2c.write(self.address, &write_buf)?;
+        self.i2c.write_read(
+            self.address,
+            &[Self::REG_INPUT_PORT],
+            &mut buffer
+        )?;
 
-        // Set initial state of outputs (all high)
-        let output_state = 0xFF;
-        let mut write_buf = [Self::REG_OUTPUT_PORT, output_state];
-        self.i2c.write(self.address, &write_buf)
+        // Configure all pins as outputs (0 = output, 1 = input for TCA9554)
+        self.i2c.write(
+            self.address,
+            &[Self::REG_CONFIG, 0x00]  // Set all pins as outputs
+        )?;
+
+        // Default output state - all pins high
+        self.i2c.write(
+            self.address,
+            &[Self::REG_OUTPUT_PORT, 0xFF]  // Set all pins high
+        )?;
+
+        Ok(())
     }
 
     fn set_pin(&mut self, pin: u8, level: bool) -> Result<(), I2cError> {
         // Read current output state
-        let mut write_buf = [Self::REG_OUTPUT_PORT];
+        let write_buf = [Self::REG_OUTPUT_PORT];
         self.i2c.write(self.address, &write_buf)?;
 
         let mut read_buf = [0u8];
@@ -135,7 +141,7 @@ impl<Dm: esp_hal::DriverMode> IOExpander<Dm> {
         }
 
         // Write back the updated state
-        let mut write_buf = [Self::REG_OUTPUT_PORT, output_state];
+        let write_buf = [Self::REG_OUTPUT_PORT, output_state];
         self.i2c.write(self.address, &write_buf)
     }
 }
@@ -932,44 +938,52 @@ fn main() -> ! {
     init_logger_from_env();
 
 
-    let i2c = I2c::new(peripherals.I2C0, esp_hal::i2c::master::Config::default())
+    let i2c = I2c::new(peripherals.I2C0,
+                       esp_hal::i2c::master::Config::default()
+                           .with_frequency(Rate::from_khz(400))
+                           .with_timeout(BusTimeout::BusCycles(1000))
+    )
         .unwrap()
-        .with_sda(peripherals.GPIO8)
-        .with_scl(peripherals.GPIO9);
+        .with_sda(peripherals.GPIO47)
+        .with_scl(peripherals.GPIO48);
 
     // Initialize IO expander for the sub-board control via SPI
     let mut io_expander = IOExpander::new(i2c);
-    io_expander.init().expect("Failed to initialize IO expander");
+    match io_expander.init() {
+        Ok(_) => info!("IO expander initialized successfully"),
+        Err(e) => {
+            error!("Failed to initialize IO expander: {:?}", e);
+        }
+    }
 
     // Create SPI via IO expander for LCD initialization
     let spi = SpiViaIOExpander::new(io_expander);
-
-    // --- Data lines for 16-bit RGB interface ---
+    // --- Data lines for 16-bit RGB interface based on ESP-BSP definitions ---
     // Lower 8 bits (D0-D7)
-    let data0 = Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default());  
-    let data1 = Output::new(peripherals.GPIO1, Level::Low, OutputConfig::default());  
-    let data2 = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());  
-    let data3 = Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());  
-    let data4 = Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default());  
-    let data5 = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());  
-    let data6 = Output::new(peripherals.GPIO6, Level::Low, OutputConfig::default());  
-    let data7 = Output::new(peripherals.GPIO7, Level::Low, OutputConfig::default());  
+    let data0 = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default()); // LCD_DATA0
+    let data1 = Output::new(peripherals.GPIO11, Level::Low, OutputConfig::default()); // LCD_DATA1
+    let data2 = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default()); // LCD_DATA2
+    let data3 = Output::new(peripherals.GPIO13, Level::Low, OutputConfig::default()); // LCD_DATA3
+    let data4 = Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default()); // LCD_DATA4
+    let data5 = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default()); // LCD_DATA5
+    let data6 = Output::new(peripherals.GPIO8, Level::Low, OutputConfig::default());  // LCD_DATA6
+    let data7 = Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default()); // LCD_DATA7
 
     // Higher 8 bits (D8-D15)
-    let data8 = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default()); 
-    let data9 = Output::new(peripherals.GPIO11, Level::Low, OutputConfig::default()); 
-    let data10 = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
-    let data11 = Output::new(peripherals.GPIO13, Level::Low, OutputConfig::default());
-    let data12 = Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default());
-    let data13 = Output::new(peripherals.GPIO15, Level::Low, OutputConfig::default());
-    let data14 = Output::new(peripherals.GPIO16, Level::Low, OutputConfig::default());
-    let data15 = Output::new(peripherals.GPIO17, Level::Low, OutputConfig::default());
+    let data8 = Output::new(peripherals.GPIO45, Level::Low, OutputConfig::default());  // LCD_DATA8
+    let data9 = Output::new(peripherals.GPIO38, Level::Low, OutputConfig::default());  // LCD_DATA9
+    let data10 = Output::new(peripherals.GPIO39, Level::Low, OutputConfig::default()); // LCD_DATA10
+    let data11 = Output::new(peripherals.GPIO40, Level::Low, OutputConfig::default()); // LCD_DATA11
+    let data12 = Output::new(peripherals.GPIO41, Level::Low, OutputConfig::default()); // LCD_DATA12
+    let data13 = Output::new(peripherals.GPIO42, Level::Low, OutputConfig::default()); // LCD_DATA13
+    let data14 = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());  // LCD_DATA14
+    let data15 = Output::new(peripherals.GPIO1, Level::Low, OutputConfig::default());  // LCD_DATA15
 
-    // RGB control signals
-    let de = Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default());    
-    let pclk = Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default());  
-    let vsync = Output::new(peripherals.GPIO20, Level::Low, OutputConfig::default()); 
-    let hsync = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default()); 
+    // RGB control signals based on ESP-BSP definitions
+    let de = Output::new(peripherals.GPIO17, Level::Low, OutputConfig::default());    // LCD_DE
+    let pclk = Output::new(peripherals.GPIO9, Level::Low, OutputConfig::default());   // LCD_PCLK
+    let vsync = Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());  // LCD_VSYNC
+    let hsync = Output::new(peripherals.GPIO46, Level::Low, OutputConfig::default()); // LCD_HSYNC
 
     // Create data pins array for 16-bit RGB interface
     let data_pins = [
