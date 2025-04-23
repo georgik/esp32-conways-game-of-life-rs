@@ -3,6 +3,7 @@
 
 extern crate alloc;
 use alloc::boxed::Box;
+use alloc::vec::Vec;
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
 
 use bevy_ecs::prelude::*;
@@ -17,24 +18,13 @@ use embedded_graphics::{
 };
 use embedded_graphics_framebuf::FrameBuf;
 use embedded_hal::delay::DelayNs;
-use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
-use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
-use esp_hal::dma_buffers;
-use esp_hal::{
-    Blocking,
-    gpio::{DriveMode, Level, Output, OutputConfig},
-    main,
-    rng::Rng,
-    spi::master::{Spi, SpiDmaBus},
-    time::Rate,
-};
+use esp_hal::{gpio::{Level, Output, OutputConfig}, i2c::master::I2c, i2c::master::Error as I2cError, main, rng::Rng, Blocking};
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
 use mipidsi::{Builder, models::GC9503CV};
 use mipidsi::{
-    interface::SpiInterface,
-    options::{ColorInversion, ColorOrder, Orientation},
+    options::ColorOrder,
 };
 use mipidsi::interface::{Generic8BitBus, ParallelInterface};
 // includes NonSend and NonSendMut
@@ -81,27 +71,630 @@ impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
     }
 }
 
-// --- Type Alias for the Concrete Display ---
-// Use the DMA-enabled SPI bus type.
-type MyDisplay = mipidsi::Display<
-    ParallelInterface<
 
-        Generic8BitBus<
-            Output<'static>, // D0
-            Output<'static>, // D1
-            Output<'static>, // D2
-            Output<'static>, // D3
-            Output<'static>, // D4
-            Output<'static>, // D5
-            Output<'static>, // D6
-            Output<'static>, // D7
-        >,
-        Output<'static>, // DC
-        Output<'static>, // WR
-    >,
-    GC9503CV,
-    Output<'static>, // Reset pin
->;
+// Type for IO Expander
+struct IOExpander<Dm: esp_hal::DriverMode> {
+    i2c: I2c<'static, Dm>,
+    address: u8,
+}
+
+
+impl<Dm: esp_hal::DriverMode> IOExpander<Dm> {
+    // TCA9554 IO Expander address
+    const BSP_IO_EXPANDER_I2C_ADDRESS: u8 = 0x20;
+
+    // Registers for TCA9554
+    // These constants are correct according to the C code
+    const REG_INPUT_PORT: u8 = 0x00;
+    const REG_OUTPUT_PORT: u8 = 0x01;
+    const REG_POLARITY_INVERSION: u8 = 0x02;
+    const REG_CONFIG: u8 = 0x03;
+
+    const BSP_LCD_SUB_BOARD_2_SPI_CS: u8 = 1;
+    const BSP_LCD_SUB_BOARD_2_SPI_SCK: u8 = 2;
+    const BSP_LCD_SUB_BOARD_2_SPI_SDO: u8 = 3;
+
+
+    fn new(i2c: I2c<'static, Dm>) -> Self {
+        Self {
+            i2c,
+            address: Self::BSP_IO_EXPANDER_I2C_ADDRESS,
+        }
+    }
+
+    fn init(&mut self) -> Result<(), I2cError> {
+        // Configure pins 1, 2, 3 as outputs (0 = output, 1 = input)
+        let config = 0xFF & !(1 << Self::BSP_LCD_SUB_BOARD_2_SPI_CS |
+            1 << Self::BSP_LCD_SUB_BOARD_2_SPI_SCK |
+            1 << Self::BSP_LCD_SUB_BOARD_2_SPI_SDO);
+
+        let mut write_buf = [Self::REG_CONFIG, config];
+        self.i2c.write(self.address, &write_buf)?;
+
+        // Set initial state of outputs (all high)
+        let output_state = 0xFF;
+        let mut write_buf = [Self::REG_OUTPUT_PORT, output_state];
+        self.i2c.write(self.address, &write_buf)
+    }
+
+    fn set_pin(&mut self, pin: u8, level: bool) -> Result<(), I2cError> {
+        // Read current output state
+        let mut write_buf = [Self::REG_OUTPUT_PORT];
+        self.i2c.write(self.address, &write_buf)?;
+
+        let mut read_buf = [0u8];
+        self.i2c.read(self.address, &mut read_buf)?;
+
+        let mut output_state = read_buf[0];
+
+        // Update the pin state
+        if level {
+            output_state |= 1 << pin;
+        } else {
+            output_state &= !(1 << pin);
+        }
+
+        // Write back the updated state
+        let mut write_buf = [Self::REG_OUTPUT_PORT, output_state];
+        self.i2c.write(self.address, &write_buf)
+    }
+}
+
+// Structure to handle the SPI-over-IO-Expander interface
+struct SpiViaIOExpander<Dm: esp_hal::DriverMode> {
+    io_expander: IOExpander<Dm>,
+}
+
+impl<Dm: esp_hal::DriverMode> SpiViaIOExpander<Dm> {
+    fn new(io_expander: IOExpander<Dm>) -> Self {
+        Self { io_expander }
+    }
+
+    fn init(&mut self) -> Result<(), I2cError> {
+        self.io_expander.init()?;
+        // Set initial state - CS high, SCK low, SDO low
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_CS, true)?;
+
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SCK, false)?;
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SDO, false)?;
+        Ok(())
+    }
+
+    // Send a command byte to the GC9503
+    fn send_command(&mut self, cmd: u8) -> Result<(), I2cError> {
+        // Assert CS (active low)
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_CS, false)?;
+
+        // Transmit command (first bit low for command)
+        self.transmit_byte(cmd, false)?;
+
+        // Deassert CS
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_CS, true)?;
+
+        Ok(())
+    }
+
+    // Send a data byte to the GC9503
+    fn send_data(&mut self, data: u8) -> Result<(), I2cError> {
+        // Assert CS (active low)
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_CS, false)?;
+
+        // Transmit data (first bit high for data)
+        self.transmit_byte(data, true)?;
+
+        // Deassert CS
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_CS, true)?;
+
+        Ok(())
+    }
+
+    // Send multiple data bytes
+    fn send_data_multiple(&mut self, data: &[u8]) -> Result<(), I2cError> {
+    // Assert CS (active low)
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_CS, false)?;
+
+        for &byte in data {
+            // Transmit data (first bit high for data)
+            self.transmit_byte(byte, true)?;
+        }
+
+        // Deassert CS
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_CS, true)?;
+
+        Ok(())
+    }
+
+    // Transmit a byte bit by bit
+    fn transmit_byte(&mut self, byte: u8, is_data: bool) -> Result<(), I2cError> {
+        let mut data = byte;
+
+        // For GC9503, we need to send the first bit as 0 for command, 1 for data
+        // Set SDO to indicate command/data
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SDO, is_data)?;
+
+        // Clock pulse for the command/data bit
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SCK, true)?;
+        self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SCK, false)?;
+
+        // Send 8 bits of data MSB first
+        for _ in 0..8 {
+            // Set data bit
+            self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SDO, (data & 0x80) != 0)?;
+            data <<= 1;
+
+            // Clock pulse
+            self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SCK, true)?;
+            self.io_expander.set_pin(IOExpander::<Dm>::BSP_LCD_SUB_BOARD_2_SPI_SCK, false)?;
+        }
+
+        Ok(())
+    }
+}
+
+
+// RGB 16-bit parallel interface type
+struct RGB16BitInterface {
+    de: Output<'static>,         // Data enable (BSP_LCD_SUB_BOARD_2_3_DE)
+    pclk: Output<'static>,       // Pixel clock (BSP_LCD_SUB_BOARD_2_3_PCLK)
+    vsync: Output<'static>,      // Vertical sync (BSP_LCD_SUB_BOARD_2_3_VSYNC)
+    hsync: Output<'static>,      // Horizontal sync (BSP_LCD_SUB_BOARD_2_3_HSYNC)
+    data_pins: [Output<'static>; 16], // 16 data pins
+}
+
+impl RGB16BitInterface {
+    fn new(
+        de: Output<'static>,
+        pclk: Output<'static>,
+        vsync: Output<'static>,
+        hsync: Output<'static>,
+        data_pins: [Output<'static>; 16],
+    ) -> Self {
+        Self {
+            de,
+            pclk,
+            vsync,
+            hsync,
+            data_pins,
+        }
+    }
+
+    // Send a pixel to the display
+    fn send_pixel(&mut self, color: Rgb565) -> Result<(), ()> {
+        // Extract 5-6-5 RGB components
+        let raw_value = color.into_storage();
+
+        // Set data pins according to the 16-bit RGB565 value
+        for i in 0..16 {
+            let bit_value = (raw_value >> i) & 0x01;
+            if bit_value != 0 {
+                self.data_pins[i].set_high();
+            } else {
+                self.data_pins[i].set_low();
+            }
+        }
+
+        // Pulse PCLK to latch the data
+        self.pclk.set_high();
+        self.pclk.set_low();
+
+        Ok(())
+    }
+
+    // Set up for a frame transfer
+    fn start_frame(&mut self) -> Result<(), ()> {
+        self.vsync.set_high();
+        self.hsync.set_low();
+        self.de.set_low();
+        Ok(())
+    }
+
+    // Start a new line
+    fn start_line(&mut self) -> Result<(), ()> {
+        self.hsync.set_high();
+        self.de.set_high();
+        Ok(())
+    }
+
+    // End a line
+    fn end_line(&mut self) -> Result<(), ()> {
+        self.hsync.set_low();
+        self.de.set_low();
+        Ok(())
+    }
+
+    // End frame
+    fn end_frame(&mut self) -> Result<(), ()> {
+        self.vsync.set_low();
+        Ok(())
+    }
+}
+
+// Custom display controller for GC9503
+struct GC9503Display<Dm: esp_hal::DriverMode> {
+    spi: SpiViaIOExpander<Dm>,
+    rgb_interface: RGB16BitInterface,
+    width: u16,
+    height: u16,
+}
+
+impl<Dm: esp_hal::DriverMode> GC9503Display<Dm> {
+    fn new(spi: SpiViaIOExpander<Dm>, rgb_interface: RGB16BitInterface, width: u16, height: u16) -> Self {
+        Self {
+            spi,
+            rgb_interface,
+            width,
+            height,
+        }
+    }
+
+    fn init(&mut self, delay: &mut impl DelayNs) -> Result<(), I2cError> {
+        // Initialize the SPI interface
+        self.spi.init()?;
+
+        // Initial delay
+        delay.delay_ms(120);
+
+        // Software reset
+        self.spi.send_command(0x01)?;
+        delay.delay_ms(120);
+
+        // Sleep out
+        self.spi.send_command(0x11)?;
+        delay.delay_ms(120);
+
+        // Set frame rate - matches ESP-BSP values
+        self.spi.send_command(0xB1)?;
+        self.spi.send_data_multiple(&[0x02, 0x35, 0x36])?;
+
+        // Set panel driving mode
+        self.spi.send_command(0xB4)?;
+        self.spi.send_data(0x00)?;
+
+        // Set display inversion
+        self.spi.send_command(0xB7)?;
+        self.spi.send_data(0x02)?;
+
+        // Set power control
+        self.spi.send_command(0xC0)?;
+        self.spi.send_data_multiple(&[0x18, 0x18])?;
+        self.spi.send_command(0xC1)?;
+        self.spi.send_data(0x41)?;
+        self.spi.send_command(0xC2)?;
+        self.spi.send_data(0x22)?;
+
+        // Vcom voltage
+        self.spi.send_command(0xC5)?;
+        self.spi.send_data(0x30)?;
+
+        // Memory access control (MADCTL)
+        self.spi.send_command(0x36)?;
+        self.spi.send_data(0x08)?; // RGB color order
+
+        // Pixel format
+        self.spi.send_command(0x3A)?;
+        self.spi.send_data(0x55)?; // 16-bit color
+
+        // Gamma correction - from ESP-BSP implementation
+        self.spi.send_command(0xE0)?;
+        self.spi.send_data_multiple(&[0x1F, 0x25, 0x22, 0x0B, 0x06, 0x0A, 0x4E, 0xC6, 0x39, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])?;
+        self.spi.send_command(0xE1)?;
+        self.spi.send_data_multiple(&[0x1F, 0x3F, 0x3F, 0x0F, 0x1F, 0x0F, 0x46, 0x49, 0x3B, 0x0F, 0x0F, 0x0F, 0x0F, 0x0F, 0x00])?;
+
+        // Set RGB interface
+        self.spi.send_command(0xB0)?;
+        self.spi.send_data(0x00)?; // RGB interface enable
+
+        // Turn on display
+        self.spi.send_command(0x29)?;
+        delay.delay_ms(20);
+
+        Ok(())
+    }
+
+    fn clear(&mut self, color: Rgb565) -> Result<(), ()> {
+        self.rgb_interface.start_frame()?;
+
+        for y in 0..self.height {
+            self.rgb_interface.start_line()?;
+
+            for _ in 0..self.width {
+                self.rgb_interface.send_pixel(color)?;
+            }
+
+            self.rgb_interface.end_line()?;
+        }
+
+        self.rgb_interface.end_frame()?;
+
+        Ok(())
+    }
+
+    fn draw_bitmap(&mut self, buffer: &[Rgb565], x: u16, y: u16, width: u16, height: u16) -> Result<(), ()> {
+        if x >= self.width || y >= self.height {
+            return Ok(());
+        }
+
+        let end_x = (x + width).min(self.width);
+        let end_y = (y + height).min(self.height);
+        let actual_width = end_x - x;
+
+        self.rgb_interface.start_frame()?;
+
+        // Skip lines before y
+        for _ in 0..y {
+            self.rgb_interface.start_line()?;
+            for _ in 0..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+            self.rgb_interface.end_line()?;
+        }
+
+        // Draw relevant lines
+        for line_y in y..end_y {
+            self.rgb_interface.start_line()?;
+
+            // Skip pixels before x
+            for _ in 0..x {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+
+            // Draw actual pixels from buffer
+            let buffer_offset = ((line_y - y) * width) as usize;
+            for offset_x in 0..actual_width {
+                let buffer_idx = buffer_offset + offset_x as usize;
+                if buffer_idx < buffer.len() {
+                    self.rgb_interface.send_pixel(buffer[buffer_idx])?;
+                } else {
+                    self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                }
+            }
+
+            // Fill remaining pixels in the line
+            for _ in end_x..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+
+            self.rgb_interface.end_line()?;
+        }
+
+        // Fill the remaining lines
+        for _ in end_y..self.height {
+            self.rgb_interface.start_line()?;
+            for _ in 0..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+            self.rgb_interface.end_line()?;
+        }
+
+        self.rgb_interface.end_frame()?;
+
+        Ok(())
+    }
+}
+
+impl<Dm: esp_hal::DriverMode> OriginDimensions for GC9503Display<Dm> {
+    fn size(&self) -> Size {
+        Size::new(self.width as u32, self.height as u32)
+    }
+}
+
+impl<Dm: esp_hal::DriverMode> DrawTarget for GC9503Display<Dm> {
+    type Color = Rgb565;
+    type Error = ();
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        // We need to collect all pixels, sort them, and then update the display
+        // since we need to draw full lines at a time
+        let mut pixel_vec: Vec<Pixel<Rgb565>> = pixels.into_iter().collect();
+
+        // Skip if no pixels to draw
+        if pixel_vec.is_empty() {
+            return Ok(());
+        }
+
+        // Sort by Y and then X for line-by-line drawing
+        pixel_vec.sort_by_key(|p| (p.0.y, p.0.x));
+
+        // Create a small buffer for the current line
+        let mut line_buffer: Vec<Pixel<Rgb565>> = Vec::new();
+        let mut current_y = pixel_vec[0].0.y;
+
+        self.rgb_interface.start_frame()?;
+
+        // Skip lines before the first pixel
+        for y in 0..current_y {
+            self.rgb_interface.start_line()?;
+            for _ in 0..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+            self.rgb_interface.end_line()?;
+        }
+
+        for pixel in pixel_vec {
+            let Point { x, y } = pixel.0;
+
+            // Skip invalid pixels
+            if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+                continue;
+            }
+
+            // If we've moved to a new line, draw the previous line
+            if y != current_y {
+                // Draw the current line
+                self.rgb_interface.start_line()?;
+
+                // Fill in any missing pixels at the start of the line
+                for _ in 0..line_buffer[0].0.x {
+                    self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                }
+
+                // Draw actual pixels with potential gaps
+                let mut last_x = 0;
+                for p in &line_buffer {
+                    // Fill gaps between pixels
+                    for _ in last_x..p.0.x {
+                        self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                    }
+
+                    // Draw the pixel
+                    self.rgb_interface.send_pixel(p.1)?;
+                    last_x = p.0.x + 1;
+                }
+
+                // Fill the end of the line
+                for _ in last_x..self.width as i32 {
+                    self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                }
+
+                self.rgb_interface.end_line()?;
+
+                // Fill any skipped lines
+                for skip_y in (current_y + 1)..y {
+                    self.rgb_interface.start_line()?;
+                    for _ in 0..self.width {
+                        self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                    }
+                    self.rgb_interface.end_line()?;
+                }
+
+                // Start a new line buffer
+                line_buffer.clear();
+                current_y = y;
+            }
+
+            // Add pixel to current line buffer
+            line_buffer.push(pixel);
+        }
+
+        // Draw the last line if any pixels remain
+        if !line_buffer.is_empty() {
+            self.rgb_interface.start_line()?;
+
+            // Fill in any missing pixels at the start of the line
+            for _ in 0..line_buffer[0].0.x {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+
+            // Draw actual pixels with potential gaps
+            let mut last_x = 0;
+            for p in &line_buffer {
+                // Fill gaps between pixels
+                for _ in last_x..p.0.x {
+                    self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+                }
+
+                // Draw the pixel
+                self.rgb_interface.send_pixel(p.1)?;
+                last_x = p.0.x + 1;
+            }
+
+            // Fill the end of the line
+            for _ in last_x..self.width as i32 {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+
+            self.rgb_interface.end_line()?;
+        }
+
+        // Fill any remaining lines
+        for y in (current_y + 1)..self.height as i32 {
+            self.rgb_interface.start_line()?;
+            for _ in 0..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+            self.rgb_interface.end_line()?;
+        }
+
+        self.rgb_interface.end_frame()?;
+
+        Ok(())
+    }
+
+    fn clear(&mut self, color: Self::Color) -> Result<(), Self::Error> {
+        // Use fill_solid to clear the entire display
+        let area = Rectangle::new(Point::zero(), self.size());
+        self.fill_solid(&area, color)
+    }
+
+
+    fn fill_contiguous<I>(&mut self, area: &Rectangle, colors: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Self::Color>,
+    {
+        let colors_vec: Vec<_> = colors.into_iter().collect();
+        let width = area.size.width as u16;
+        let height = area.size.height as u16;
+
+        self.draw_bitmap(
+            &colors_vec,
+            area.top_left.x as u16,
+            area.top_left.y as u16,
+            width,
+            height,
+        )
+    }
+
+    fn fill_solid(&mut self, area: &Rectangle, color: Self::Color) -> Result<(), Self::Error> {
+        let x = area.top_left.x as u16;
+        let y = area.top_left.y as u16;
+        let width = area.size.width as u16;
+        let height = area.size.height as u16;
+
+        self.rgb_interface.start_frame()?;
+
+        // Skip lines before y
+        for _ in 0..y {
+            self.rgb_interface.start_line()?;
+            for _ in 0..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+            self.rgb_interface.end_line()?;
+        }
+
+        // Draw the filled rectangle lines
+        for line_y in y..(y + height).min(self.height) {
+            self.rgb_interface.start_line()?;
+
+            // Pixels before the rectangle
+            for _ in 0..x {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+
+            // Rectangle pixels
+            for _ in x..(x + width).min(self.width) {
+                self.rgb_interface.send_pixel(color)?;
+            }
+
+            // Pixels after the rectangle
+            for _ in (x + width).min(self.width)..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+
+            self.rgb_interface.end_line()?;
+        }
+
+        // Remaining lines after the rectangle
+        for _ in (y + height).min(self.height)..self.height {
+            self.rgb_interface.start_line()?;
+            for _ in 0..self.width {
+                self.rgb_interface.send_pixel(Rgb565::BLACK)?;
+            }
+            self.rgb_interface.end_line()?;
+        }
+
+        self.rgb_interface.end_frame()?;
+
+        Ok(())
+    }
+}
+
+
+
+// --- Type Alias for the Concrete Display ---
+type MyDisplay = GC9503Display<Blocking>;
 
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
@@ -333,75 +926,72 @@ fn render_system(
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    // PSRAM allocator for heap memory.
-    // Note: Placing framebuffer into PSRAM might result into slower redraw.
+    // PSRAM allocator for heap memory
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
-    // esp_alloc::heap_allocator!(size: 150 * 1024);
 
     init_logger_from_env();
 
-    // --- DMA Buffers for SPI ---
-    // let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(8912);
-    // let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
-    // let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
-    // For 8-bit parallel interface, we'll use the first 8 data lines (DATA0-DATA7)
+    let i2c = I2c::new(peripherals.I2C0, esp_hal::i2c::master::Config::default())
+        .unwrap()
+        .with_sda(peripherals.GPIO8)
+        .with_scl(peripherals.GPIO9);
 
-    // Define the pins for the 8-bit parallel bus
-    let data0 = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default()); // DATA0
-    let data1 = Output::new(peripherals.GPIO11, Level::Low, OutputConfig::default()); // DATA1
-    let data2 = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default()); // DATA2
-    let data3 = Output::new(peripherals.GPIO13, Level::Low, OutputConfig::default()); // DATA3
-    let data4 = Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default()); // DATA4
-    let data5 = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default()); // DATA5
+    // Initialize IO expander for the sub-board control via SPI
+    let mut io_expander = IOExpander::new(i2c);
+    io_expander.init().expect("Failed to initialize IO expander");
 
-    // Choose the appropriate DATA6 and DATA7 pins based on your board version
-    // For standard boards:
-    let data6 = Output::new(peripherals.GPIO47, Level::Low, OutputConfig::default()); // DATA6
-    let data7 = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default()); // DATA7
+    // Create SPI via IO expander for LCD initialization
+    let spi = SpiViaIOExpander::new(io_expander);
 
-    // For ESP32-S3-WROOM-1-N16R16V boards (uncomment if needed):
-    // let data6 = Output::new(peripherals.GPIO8, Level::Low, OutputConfig::default()); // DATA6_R16
-    // let data7 = Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default()); // DATA7_R16
+    // --- Data lines for 16-bit RGB interface ---
+    // Lower 8 bits (D0-D7)
+    let data0 = Output::new(peripherals.GPIO0, Level::Low, OutputConfig::default());  
+    let data1 = Output::new(peripherals.GPIO1, Level::Low, OutputConfig::default());  
+    let data2 = Output::new(peripherals.GPIO2, Level::Low, OutputConfig::default());  
+    let data3 = Output::new(peripherals.GPIO3, Level::Low, OutputConfig::default());  
+    let data4 = Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default());  
+    let data5 = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());  
+    let data6 = Output::new(peripherals.GPIO6, Level::Low, OutputConfig::default());  
+    let data7 = Output::new(peripherals.GPIO7, Level::Low, OutputConfig::default());  
 
-    // Define control pins
-    // Using HSYNC as DC (Data/Command) pin
-    let dc = Output::new(peripherals.GPIO46, Level::Low, OutputConfig::default());
+    // Higher 8 bits (D8-D15)
+    let data8 = Output::new(peripherals.GPIO10, Level::Low, OutputConfig::default()); 
+    let data9 = Output::new(peripherals.GPIO11, Level::Low, OutputConfig::default()); 
+    let data10 = Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default());
+    let data11 = Output::new(peripherals.GPIO13, Level::Low, OutputConfig::default());
+    let data12 = Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default());
+    let data13 = Output::new(peripherals.GPIO15, Level::Low, OutputConfig::default());
+    let data14 = Output::new(peripherals.GPIO16, Level::Low, OutputConfig::default());
+    let data15 = Output::new(peripherals.GPIO17, Level::Low, OutputConfig::default());
 
-    // Using DE as WR (Write Enable) pin
-    let wr = Output::new(peripherals.GPIO17, Level::High, OutputConfig::default());
+    // RGB control signals
+    let de = Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default());    
+    let pclk = Output::new(peripherals.GPIO19, Level::Low, OutputConfig::default());  
+    let vsync = Output::new(peripherals.GPIO20, Level::Low, OutputConfig::default()); 
+    let hsync = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default()); 
 
-    // Reset pin
-    let reset = Output::new(
-        peripherals.GPIO3, // Using VSYNC as reset pin
-        Level::High,
-        OutputConfig::default(),
-    );
-
-    // Create the 8-bit parallel bus
-    let bus = Generic8BitBus::new((
+    // Create data pins array for 16-bit RGB interface
+    let data_pins = [
         data0, data1, data2, data3, data4, data5, data6, data7,
-    ));
+        data8, data9, data10, data11, data12, data13, data14, data15,
+    ];
 
-    // Create the parallel interface from bus, DC pin, and WR pin
-    let di = ParallelInterface::new(bus, dc, wr);
+    // Create RGB interface
+    let rgb_interface = RGB16BitInterface::new(de, pclk, vsync, hsync, data_pins);
+
+    // LCD dimensions
+    let width = 480;
+    let height = 480;
+
+    // Create and initialize GC9503 display
+    let mut display = GC9503Display::new(spi, rgb_interface, width, height);
 
     let mut display_delay = Delay::new();
-    display_delay.delay_ns(500_000u32);
+    display.init(&mut display_delay).expect("Failed to initialize display");
 
-    // Initialize the display using mipidsi's builder
-    let mut display: MyDisplay = Builder::new(GC9503CV, di)
-        .reset_pin(reset)
-        .display_size(480, 480)  // Correct resolution for GC9503CV
-        .color_order(ColorOrder::Bgr)  // GC9503CV typically uses BGR color order
-        .init(&mut display_delay)
-        .unwrap();
-
-    display.clear(Rgb565::BLUE).unwrap();
-
-    // Backlight
-    // let mut backlight = Output::new(peripherals.GPIO47, Level::Low, OutputConfig::default());
-    // backlight.set_high();
+    // Clear the display with blue color
+    display.clear(Rgb565::BLUE).expect("Failed to clear display");
 
     info!("Display initialized");
 
@@ -409,20 +999,22 @@ fn main() -> ! {
     let mut game = GameOfLifeResource::default();
     let mut rng_instance = Rng::new(peripherals.RNG);
     randomize_grid(&mut rng_instance, &mut game.grid);
+
+    // Create a glider pattern
     let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
     for (x, y) in glider.iter() {
         game.grid[*y][*x] = 1; // alive with age 1
     }
 
-    // Create the framebuffer resource.
+    // Create the framebuffer resource
     let fb_res = FrameBufferResource::new();
 
     let mut world = World::default();
     world.insert_resource(game);
     world.insert_resource(RngResource(rng_instance));
-    // Insert the display as a non-send resource because its DMA pointers are not Sync.
+    // Insert the display as a non-send resource
     world.insert_non_send_resource(DisplayResource { display });
-    // Insert the framebuffer resource as a normal resource.
+    // Insert the framebuffer resource
     world.insert_resource(fb_res);
 
     let mut schedule = Schedule::default();
