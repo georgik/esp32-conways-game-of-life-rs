@@ -186,8 +186,8 @@ type MyDisplay = FrameBuf<Rgb565, &'static mut [u16]>;
 type HeapDisplay<const N: usize> = FrameBuf<Rgb565, HeapBuffer<Rgb565, N>>;
 
 // Resources for display access
-struct DisplayResource<const N: usize> {
-    display: FrameBuf<Rgb565, HeapBuffer<Rgb565, N>>,
+struct DisplayResource {
+    display: FrameBuf<Rgb565, HeapBuffer<Rgb565, BUFFER_SIZE>>,
     dpi: Dpi<'static, Blocking>,
     dma_buf: DmaTxBuf,
 }
@@ -346,11 +346,11 @@ struct FrameBufferResource {
 
 /// Render the game state to the display using the hardware RGB interface
 /// Render the game state to the display using the hardware RGB interface
-fn render_system<D: esp_hal::DriverMode, const N: usize, const DM: usize>(
-    mut display_res: NonSendMut<DisplayResource<DM>>,
+fn render_system(
+    mut display_res: NonSendMut<DisplayResource>,
     game: Res<GameOfLifeResource>,
     mut fb_res: ResMut<FrameBufferResource>,
-)  {
+) {
 
     // Clear the framebuffer.
     fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
@@ -387,9 +387,10 @@ fn render_system<D: esp_hal::DriverMode, const N: usize, const DM: usize>(
     let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
 
     // Convert framebuffer data to a slice of u16 values that can be written to the DMA buffer
-    let mut pixel_data = [0u16; DM];
+    let mut pixel_data = alloc::vec![0u16; LCD_BUFFER_SIZE];
+
     for (i, pixel) in fb_res.frame_buf.data.iter().enumerate() {
-        if i < DM {
+        if i < LCD_BUFFER_SIZE {
             // Convert Rgb565 to u16
             pixel_data[i] = pixel.to_le_bytes()[0] as u16 | ((pixel.to_le_bytes()[1] as u16) << 8);
             // Alternatively, if available: pixel_data[i] = pixel.into_storage();
@@ -619,8 +620,6 @@ fn main() -> ! {
     // Wait a moment so we can see the blue screen
     loop_delay.delay_ms(500u32);
 
-    println!("Display initialized with blue screen");
-
 
 
     // Initialize RNG
@@ -664,15 +663,14 @@ fn main() -> ! {
     schedule.add_systems((
         update_game_of_life_system,
         button_reset_system,
-        render_system::<esp_hal::Blocking, 480, 480>,  // Explicitly specify all three generic parameters
+        render_system
     ).chain());
 
 
     // Main ECS loop
-
-
     loop {
         schedule.run(&mut world);
+
         loop_delay.delay_ms(50u32);
     }
 }
