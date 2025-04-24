@@ -595,74 +595,100 @@ fn main() -> ! {
     let mut loop_delay = Delay::new();
 
     println!("Starting main loop");
+    let mut current_line = 0;
+
 
     // Main loop
     loop {
         // Wait for previous transfer to complete and get resources back
         (_, dpi, dma_buf) = transfer.wait();
 
-        // Update game state
-        update_game_of_life(&mut game_grid);
-        generation += 1;
-        if generation >= RESET_AFTER_GENERATIONS {
-            randomize_grid(&mut rng, &mut game_grid);
-            generation = 0;
+        if current_line == 0 {
+
+            // Update game state
+            update_game_of_life(&mut game_grid);
+            generation += 1;
+            if generation >= RESET_AFTER_GENERATIONS {
+                randomize_grid(&mut rng, &mut game_grid);
+                generation = 0;
+            }
+
+            // Clear the framebuffer
+            frame_buf.clear(Rgb565::BLACK).unwrap();
+
+            // Draw the game grid and generation count
+            draw_grid(&mut frame_buf, &game_grid).unwrap();
+            write_generation(&mut frame_buf, generation).unwrap();
+
+            // Overlay centered text
+            let line1 = "Rust no_std ESP32-S3";
+            let line2 = "Conway's Game of Life";
+            let line1_width = line1.len() as i32 * 8;
+            let line2_width = line2.len() as i32 * 8;
+            let x1 = (LCD_H_RES as i32 - line1_width) / 2;
+            let x2 = (LCD_H_RES as i32 - line2_width) / 2;
+            let y = (LCD_V_RES as i32 - 26) / 2;
+
+            Text::new(
+                line1,
+                Point::new(x1, y),
+                MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+            )
+                .draw(&mut frame_buf)
+                .unwrap();
+
+            Text::new(
+                line2,
+                Point::new(x2, y + 14),
+                MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+            )
+                .draw(&mut frame_buf)
+                .unwrap();
         }
 
-        // Clear the framebuffer
-        frame_buf.clear(Rgb565::BLACK).unwrap();
+        // Calculate how many lines we can fit in the DMA buffer
+        let line_bytes = LCD_H_RES as usize * 2;  // Each pixel is 2 bytes
+        let lines_per_transfer = dma_buf.len() / line_bytes;
 
-        // Draw the game grid and generation count
-        draw_grid(&mut frame_buf, &game_grid).unwrap();
-        write_generation(&mut frame_buf, generation).unwrap();
+        // Make sure we don't go past the end of the screen
+        let lines_to_draw = core::cmp::min(lines_per_transfer, LCD_V_RES as usize - current_line);
 
-        // Overlay centered text
-        let line1 = "Rust no_std ESP32-S3";
-        let line2 = "Conway's Game of Life";
-        let line1_width = line1.len() as i32 * 8;
-        let line2_width = line2.len() as i32 * 8;
-        let x1 = (LCD_H_RES as i32 - line1_width) / 2;
-        let x2 = (LCD_H_RES as i32 - line2_width) / 2;
-        let y = (LCD_V_RES as i32 - 26) / 2;
+        // Fill DMA buffer with the next set of lines from the framebuffer
+        for line_offset in 0..lines_to_draw {
+            let y = current_line + line_offset;
+            for x in 0..LCD_H_RES as usize {
+                // Calculate source index in framebuffer
+                let fb_idx = y * LCD_H_RES as usize + x;
 
-        Text::new(
-            line1,
-            Point::new(x1, y),
-            MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-        )
-            .draw(&mut frame_buf)
-            .unwrap();
+                // Calculate destination index in DMA buffer
+                let dma_idx = line_offset * line_bytes + x * 2;
 
-        Text::new(
-            line2,
-            Point::new(x2, y + 14),
-            MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-        )
-            .draw(&mut frame_buf)
-            .unwrap();
+                // Get pixel color from framebuffer
+                let color = frame_buf.get_color_at(Point::new(x as i32, y as i32));
 
-        // Convert framebuffer to the format needed by the display
-        // Iterate through pixels and copy to DMA buffer
-        for y in 0..LCD_V_RES {
-            for x in 0..LCD_H_RES {
-                let pixel_idx = (y as usize * LCD_H_RES as usize + x as usize) as u32;
-                let dma_idx = (pixel_idx * 2) as usize;
+                // Convert to bytes and write to DMA buffer
+                // NOTE: Try both byte orders if one doesn't work
+                let color_u16 = rgb565_to_u16(color);
 
-                if dma_idx + 1 < dma_buf.len() {
-                    // Get pixel color from framebuffer using the correct method
-                    let color = frame_buf.get_color_at(Point::new(x as i32, y as i32));
+                // Try this byte order first:
+                dma_buf[dma_idx..dma_idx+2].copy_from_slice(&color_u16.to_be_bytes());
 
-                    // Convert to u16 and write to DMA buffer as little-endian bytes
-                    let color_u16 = rgb565_to_u16(color);
-                    dma_buf[dma_idx..dma_idx+2].copy_from_slice(&color_u16.to_le_bytes());
-                }
+                // If the above doesn't work, try this alternate byte order:
+                // dma_buf[dma_idx..dma_idx+2].copy_from_slice(&color_u16.to_le_bytes());
             }
         }
 
         // Start new transfer to the display
         transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
 
-        // Short delay to control frame rate
-        loop_delay.delay_ms(50u32);
+        // Update the current line for the next iteration
+        current_line += lines_to_draw;
+        if current_line >= LCD_V_RES as usize {
+            current_line = 0;  // Reset to start of screen
+
+            // Add a small delay between full frames
+            loop_delay.delay_ms(10u32);
+        }
+
     }
 }
