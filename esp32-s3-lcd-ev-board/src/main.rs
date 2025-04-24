@@ -131,6 +131,10 @@ impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
     pub fn new(data: Box<[C; N]>) -> Self {
         Self(data)
     }
+
+    pub fn as_slice(&self) -> &[C] {
+        self.0.as_ref()
+    }
 }
 
 impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
@@ -343,73 +347,62 @@ struct FrameBufferResource {
     frame_buf: MyFrameBuf,
 }
 
-
-/// Render the game state to the display using the hardware RGB interface
-/// Render the game state to the display using the hardware RGB interface
-fn render_system(
-    mut display_res: NonSendMut<DisplayResource>,
-    game: Res<GameOfLifeResource>,
-    mut fb_res: ResMut<FrameBufferResource>,
-) {
-
-    // Clear the framebuffer.
-    fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
-    // Draw the game grid (using the age-based color) and generation number.
-    draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
-    write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
-
-    // --- Overlay centered text ---
-    let line1 = "Rust no_std ESP32-S3-LCD-Ev-BOARD";
-    let line2 = "Bevy ECS 0.15 no_std";
-    // Estimate text width: assume ~8 pixels per character.
-    let line1_width = line1.len() as i32 * 8;
-    let line2_width = line2.len() as i32 * 8;
-    let x1 = (LCD_H_RES as i32 - line1_width) / 2 + 14;
-    let x2 = (LCD_H_RES as i32 - line2_width) / 2 + 14;
-    // For vertical centering, assume 26 pixels total text height.
-    let y = (LCD_V_RES as i32 - 26) / 2;
-    Text::new(
-        line1,
-        Point::new(x1, y),
-        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-    )
-        .draw(&mut fb_res.frame_buf)
-        .unwrap();
-    Text::new(
-        line2,
-        Point::new(x2, y + 14),
-        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-    )
-        .draw(&mut fb_res.frame_buf)
-        .unwrap();
-
-    // Define the area covering the entire framebuffer.
-    let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
-
-    // Convert framebuffer data to a slice of u16 values that can be written to the DMA buffer
-    let mut pixel_data = alloc::vec![0u16; LCD_BUFFER_SIZE];
-
-    for (i, pixel) in fb_res.frame_buf.data.iter().enumerate() {
-        if i < LCD_BUFFER_SIZE {
-            // Convert Rgb565 to u16
-            pixel_data[i] = pixel.to_le_bytes()[0] as u16 | ((pixel.to_le_bytes()[1] as u16) << 8);
-            // Alternatively, if available: pixel_data[i] = pixel.into_storage();
-        }
-    }
-
-    // Write the prepared data to the DMA buffer
-    // Get a mutable reference to the underlying buffer
-    let buffer = display_res.dma_buf.as_mut_slice();
-    for (i, &pixel) in pixel_data.iter().enumerate() {
-        if i < buffer.len() {
-            buffer[i] = pixel as u8;
-        }
-    }
-
-    // Add any necessary flush/update call to your display hardware here
-    // For example: display_res.flush().unwrap();
-}
-
+// fn render_system(
+//     mut display_res: NonSendMut<DisplayResource>,
+//     game: Res<GameOfLifeResource>,
+//     mut fb_res: ResMut<FrameBufferResource>,
+// ) {
+//     // Clear the framebuffer
+//     fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
+//
+//     // Draw the game grid and generation number
+//     draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
+//     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
+//
+//     // Overlay centered text
+//     let line1 = "Rust no_std ESP32-S3";
+//     let line2 = "Bevy ECS 0.15 no_std";
+//     let line1_width = line1.len() as i32 * 8;
+//     let line2_width = line2.len() as i32 * 8;
+//     let x1 = (LCD_H_RES as i32 - line1_width) / 2 + 14;
+//     let x2 = (LCD_H_RES as i32 - line2_width) / 2 + 14;
+//     let y = (LCD_V_RES as i32 - 26) / 2;
+//
+//     Text::new(
+//         line1,
+//         Point::new(x1, y),
+//         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+//     )
+//         .draw(&mut fb_res.frame_buf)
+//         .unwrap();
+//
+//     Text::new(
+//         line2,
+//         Point::new(x2, y + 14),
+//         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+//     )
+//         .draw(&mut fb_res.frame_buf)
+//         .unwrap();
+//
+//     // Define the area covering the entire framebuffer
+//     let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
+//
+//     // Access the underlying data through our custom HeapBuffer method
+//     // This is a bit hacky, but necessary since we don't have direct access to the data
+//     let fb_data = unsafe {
+//         // Get a reference to the HeapBuffer from the FrameBuf
+//         // This assumes the HeapBuffer is stored directly in the FrameBuf
+//         let frame_buf_ptr = &fb_res.frame_buf as *const _ as *const HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
+//         &*frame_buf_ptr
+//     };
+//
+//     // Use our added method to get a slice of pixels
+//     display_res
+//         .display
+//         .fill_contiguous(&area, fb_data.as_slice().iter().copied())
+//         .unwrap();
+//
+// }
 fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     generation: usize,
@@ -432,7 +425,7 @@ fn main() -> ! {
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
     init_logger_from_env();
 
-    // --- Setup I2C for the display controller initialization ---
+    // Setup I2C for the TCA9554 IO expander
     let i2c = I2c::new(
         peripherals.I2C0,
         i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
@@ -441,15 +434,15 @@ fn main() -> ! {
         .with_sda(peripherals.GPIO47)
         .with_scl(peripherals.GPIO48);
 
+    // Initialize the IO expander for controlling the display
     let mut expander = Tca9554::new(i2c);
     expander.write_output_reg(0b1111_0011).unwrap();
     expander.write_direction_reg(0b1111_0001).unwrap();
 
     let delay = Delay::new();
+    println!("Initializing display...");
 
-    println!("Initializing display controller");
-
-    // Initialize the display controller via I2C expander
+    // Set up the write_byte function for sending commands to the display
     let mut write_byte = |b: u8, is_cmd: bool| {
         const SCS_BIT: u8 = 0b0000_0010;
         const SCL_BIT: u8 = 0b0000_0100;
@@ -458,7 +451,9 @@ fn main() -> ! {
         let mut output = 0b1111_0001 & !SCS_BIT;
         expander.write_output_reg(output).unwrap();
 
-        for bit in core::iter::once(!is_cmd).chain((0..8).map(|i| (b >> i) & 0b1 != 0).rev()) {
+        for bit in core::iter::once(!is_cmd)
+            .chain((0..8).map(|i| (b >> i) & 0b1 != 0).rev())
+        {
             let prev = output;
             if bit {
                 output |= SDA_BIT;
@@ -491,7 +486,7 @@ fn main() -> ! {
     let vsync_must_be_high_during_setup =
         Output::new(&mut vsync_pin, Level::High, OutputConfig::default());
 
-    // Send initialization commands to the display controller
+    // Initialize the display by sending the initialization commands
     for &init in INIT_CMDS.iter() {
         match init {
             InitCmd::Cmd(cmd, args) => {
@@ -501,17 +496,21 @@ fn main() -> ! {
                 }
             }
             InitCmd::Delay(ms) => {
-                delay.delay_millis(ms as u32);
+                delay.delay_millis(ms as _);
             }
         }
     }
     drop(vsync_must_be_high_during_setup);
 
-    // --- Configure the LCD_CAM peripheral for RGB interface ---
+    // Set up DMA channel for LCD
     let tx_channel = peripherals.DMA_CH2;
     let lcd_cam = LcdCam::new(peripherals.LCD_CAM);
 
-    // Configure the RGB interface
+    // Create a DMA buffer for sending data to the display
+    // 4 scan lines
+    let mut dma_buf = dma_loop_buffer!(2 * 480 * 4);
+
+    // Configure the RGB display
     let config = Config::default()
         .with_clock_mode(ClockMode {
             polarity: Polarity::IdleLow,
@@ -541,8 +540,8 @@ fn main() -> ! {
         .with_de_idle_level(Level::Low)
         .with_disable_black_region(false);
 
-    // Initialize the RGB parallel display interface
-    let dpi = Dpi::new(lcd_cam.lcd, tx_channel, config)
+    // Initialize the DPI interface with all the pins
+    let mut dpi = Dpi::new(lcd_cam.lcd, tx_channel, config)
         .unwrap()
         .with_vsync(vsync_pin)
         .with_hsync(peripherals.GPIO46)
@@ -568,109 +567,102 @@ fn main() -> ! {
         .with_data14(peripherals.GPIO2)
         .with_data15(peripherals.GPIO1);
 
-    println!("Display initialized");
+    println!("Display initialized, starting game logic");
 
-    // --- Initialize ECS Resources ---
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(8912);
-    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
-    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
-
-    // Setup button
-    let button = Input::new(
-        peripherals.GPIO0,  // Adjust to match your board's button pin
-        InputConfig::default().with_pull(Pull::Up),
-    );
-    let button_resource = ButtonResource { button };
-
-    // Create the framebuffer resource with HeapBuffer
-    let fb_data = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
-    let fb_buffer = HeapBuffer::new(fb_data);
-    let frame_buf = FrameBuf::new(fb_buffer, LCD_H_RES as usize, LCD_V_RES as usize);
-    let fb_resource = FrameBufferResource { frame_buf };
-
-    // Create the DMA buffer using DMA-compatible buffers
-    let dma_buf = dma_tx_buf;
-
-    // Create display buffer using HeapBuffer
-    let display_data = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
-    let display_buffer = HeapBuffer::new(display_data);
-    let display = FrameBuf::new(display_buffer, LCD_H_RES as usize, LCD_V_RES as usize);
-
-    // Create the display resource
-    let mut display_resource = DisplayResource {
-        display,
-        dpi,
-        dma_buf,
-    };
-
-    // Initialize display with blue color to confirm it's working properly
-    let blue_value = Rgb565::BLUE.into_storage();
-    // Fill the buffer with blue color
-    // let buffer = display_resource.dma_buf.buffer();
-    // for i in 0..LCD_BUFFER_SIZE.min(buffer.len()) {
-    //     buffer[i] = blue_value;
-    // }
-
-    // This is the recommended approach for your code structure
-    // let transfer = display_resource.dpi.send(false, &mut display_resource.dma_buf);
-    // // This re-assigns the values back to your resource after the transfer completes
-    // (_, display_resource.dpi, display_resource.dma_buf) = transfer.wait();
-
-    let mut loop_delay = Delay::new();
-    // Wait a moment so we can see the blue screen
-    loop_delay.delay_ms(500u32);
-
-
-
-    // Initialize RNG
-    let mut rng_instance = Rng::new(peripherals.RNG);
-
-    // Initialize game grid
+    // Initialize Game of Life
     let mut game_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
-    randomize_grid(&mut rng_instance, &mut game_grid);
+    let mut generation = 0;
+    let mut rng = Rng::new(peripherals.RNG);
 
-    // Add a glider pattern
-    let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
-    for (x, y) in glider.iter() {
-        game_grid[*y][*x] = 1;
+    // Initialize with random state
+    randomize_grid(&mut rng, &mut game_grid);
+
+    // Create a framebuffer in RAM
+    let fb_data: Box<[Rgb565; LCD_BUFFER_SIZE]> = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
+    let heap_buffer = HeapBuffer::new(fb_data);
+    let mut frame_buf = FrameBuf::new(heap_buffer, LCD_H_RES.into(), LCD_V_RES.into());
+
+    // Draw initial screen (blue for testing)
+    frame_buf.clear(Rgb565::BLUE).unwrap();
+
+    // Helper function to convert Rgb565 to raw u16 format for the display
+    fn rgb565_to_u16(color: Rgb565) -> u16 {
+        color.into_storage()
     }
 
-    let game_resource = GameOfLifeResource {
-        grid: game_grid,
-        generation: 0,
-    };
+    // Initial transfer
+    let mut transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
+    let mut loop_delay = Delay::new();
 
+    println!("Starting main loop");
 
-
-    // --- Initialize ECS World and Schedule ---
-    let mut world = World::new();
-
-    // Add resources to the world
-    world.insert_resource(game_resource);
-    world.insert_resource(RngResource(rng_instance));
-    world.insert_resource(ButtonState::default());
-    world.insert_resource(fb_resource);
-
-    // Insert non-send resources
-    world.insert_non_send_resource(display_resource);
-    world.insert_non_send_resource(button_resource);
-
-
-    // Add systems to schedule
-    let mut schedule = Schedule::default();
-
-    // Add systems to schedule
-    schedule.add_systems((
-        update_game_of_life_system,
-        button_reset_system,
-        render_system
-    ).chain());
-
-
-    // Main ECS loop
+    // Main loop
     loop {
-        schedule.run(&mut world);
+        // Wait for previous transfer to complete and get resources back
+        (_, dpi, dma_buf) = transfer.wait();
 
+        // Update game state
+        update_game_of_life(&mut game_grid);
+        generation += 1;
+        if generation >= RESET_AFTER_GENERATIONS {
+            randomize_grid(&mut rng, &mut game_grid);
+            generation = 0;
+        }
+
+        // Clear the framebuffer
+        frame_buf.clear(Rgb565::BLACK).unwrap();
+
+        // Draw the game grid and generation count
+        draw_grid(&mut frame_buf, &game_grid).unwrap();
+        write_generation(&mut frame_buf, generation).unwrap();
+
+        // Overlay centered text
+        let line1 = "Rust no_std ESP32-S3";
+        let line2 = "Conway's Game of Life";
+        let line1_width = line1.len() as i32 * 8;
+        let line2_width = line2.len() as i32 * 8;
+        let x1 = (LCD_H_RES as i32 - line1_width) / 2;
+        let x2 = (LCD_H_RES as i32 - line2_width) / 2;
+        let y = (LCD_V_RES as i32 - 26) / 2;
+
+        Text::new(
+            line1,
+            Point::new(x1, y),
+            MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+        )
+            .draw(&mut frame_buf)
+            .unwrap();
+
+        Text::new(
+            line2,
+            Point::new(x2, y + 14),
+            MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+        )
+            .draw(&mut frame_buf)
+            .unwrap();
+
+        // Convert framebuffer to the format needed by the display
+        // Iterate through pixels and copy to DMA buffer
+        for y in 0..LCD_V_RES {
+            for x in 0..LCD_H_RES {
+                let pixel_idx = (y as usize * LCD_H_RES as usize + x as usize) as u32;
+                let dma_idx = (pixel_idx * 2) as usize;
+
+                if dma_idx + 1 < dma_buf.len() {
+                    // Get pixel color from framebuffer using the correct method
+                    let color = frame_buf.get_color_at(Point::new(x as i32, y as i32));
+
+                    // Convert to u16 and write to DMA buffer as little-endian bytes
+                    let color_u16 = rgb565_to_u16(color);
+                    dma_buf[dma_idx..dma_idx+2].copy_from_slice(&color_u16.to_le_bytes());
+                }
+            }
+        }
+
+        // Start new transfer to the display
+        transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
+
+        // Short delay to control frame rate
         loop_delay.delay_ms(50u32);
     }
 }
