@@ -43,7 +43,7 @@ use esp_hal::{
     time::Rate,
 };
 use esp_println::{logger::init_logger_from_env, print, println};
-use log::info;
+use log::{info, error};
 use bevy_ecs::prelude::*;
 use mipidsi::interface::ParallelInterface;
 
@@ -554,7 +554,10 @@ fn main() -> ! {
 
     // Create a DMA buffer for sending data to the display
     // 4 scan lines
-    let mut dma_buf = dma_loop_buffer!(2 * 480);
+    let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2);
+
+    let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
+
 
     // Configure the RGB display
     let config = Config::default()
@@ -643,6 +646,7 @@ fn main() -> ! {
     println!("Starting main loop");
     let mut current_line = 0;
     let mut current_pixel = 0;
+    let mut dma_tx_buf = dma_tx_buf1;
 
 
     // Main loop
@@ -691,46 +695,48 @@ fn main() -> ! {
                 .unwrap();
         }
 
-        // Calculate how many pixels we can send at once
-        let pixels_per_transfer = dma_buf.len() / 2; // Each pixel is 2 bytes
+        // Fill the DMA buffer with one line of pixels from the framebuffer
+        for x in 0..LCD_H_RES as usize {
+            let color = frame_buf.get_color_at(Point::new(x as i32, current_line as i32));
+            let color_u16:u16 =  x as u16 + current_line  as u16;
+            dma_tx_buf.as_mut_slice()[x*2..x*2+2].copy_from_slice(&color_u16.to_le_bytes());
+        }
 
-        // Fill the DMA buffer with pixels
-        for i in 0..pixels_per_transfer {
-            if current_pixel < LCD_H_RES {
-                // Get the correct color from the framebuffer
-                let color = frame_buf.get_color_at(Point::new(current_pixel as i32, current_line as i32));
 
-                // Convert to u16 and write to DMA buffer
-                let color_u16 = rgb565_to_u16(color);
+        // Send the buffer to display with proper error handling
+        match dpi.send(false, dma_tx_buf) {
+            Ok(transfer) => {
+                // Wait for the transfer to complete
+                let (result, dpi_returned, buf_returned) = transfer.wait();
 
-                // Try different byte orders
-                // dma_buf[i*2..i*2+2].copy_from_slice(&color_u16.to_be_bytes());
-                dma_buf[i*2..i*2+2].copy_from_slice(&color_u16.to_le_bytes());
+                // Update our variables with the returned values
+                dpi = dpi_returned;
+                dma_tx_buf = buf_returned;
 
-                current_pixel += 1;
-            } else {
-                // Fill remaining buffer with black if we've reached the end of the line
-                dma_buf[i*2..i*2+2].copy_from_slice(&0u16.to_le_bytes());
+                // Log any errors
+                if let Err(err) = result {
+                    error!("DMA transfer error: {:?}", err);
+                }
+            },
+            Err((err, dpi_returned, buf_returned)) => {
+                error!("Failed to send DMA buffer: {:?}", err);
+                dpi = dpi_returned;
+                dma_tx_buf = buf_returned;
             }
         }
 
-        // Start new transfer to the display
-        let transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
-        (_, dpi, dma_buf) = transfer.wait();
-
 
         // Update pixel/line counters
-        if current_pixel >= LCD_H_RES {
-            current_pixel = 0;
+        // if current_pixel >= LCD_H_RES {
+        //     current_pixel = 0;
             current_line += 1;
 
-            if current_line >= LCD_V_RES as usize {
+            if current_line >= LCD_V_RES {
                 current_line = 0;
                 // Small delay between frames
                 loop_delay.delay_ms(10u32);
             }
-        }
-        println!("tick")
+        // }
 
     }
 }
