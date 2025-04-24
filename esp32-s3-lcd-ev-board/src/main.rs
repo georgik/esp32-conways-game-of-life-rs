@@ -218,6 +218,15 @@ const INIT_CMDS: &[InitCmd] = &[
             0x03, 0xd0, 0x03, 0xe0, 0x03, 0xea, 0x03, 0xfa, 0x03, 0xff,
         ],
     ),
+
+    InitCmd::Cmd(0x36, &[0x00]),
+
+
+    InitCmd::Cmd(0x2A, &[0x00, 0x00, 0x01, 0xDF]),  // 0 to 479 (0x1DF)
+
+    // Set full row address range
+    InitCmd::Cmd(0x2B, &[0x00, 0x00, 0x01, 0xDF]),  // 0 to 479 (0x1DF)
+
     InitCmd::Cmd(0x3A, &[0x66]),
     InitCmd::Cmd(0x11, &[]),
     InitCmd::Delay(120),
@@ -557,6 +566,7 @@ fn main() -> ! {
     let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2);
 
     let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
+    println!("DMA buffer size: {} bytes", dma_tx_buf1.len());
 
 
     // Configure the RGB display
@@ -572,17 +582,17 @@ fn main() -> ! {
         })
         .with_timing(FrameTiming {
             horizontal_active_width: 480,
-            horizontal_total_width: 520,
-            horizontal_blank_front_porch: 10,
+            horizontal_total_width: 550,
+            horizontal_blank_front_porch: 40,
 
             vertical_active_height: 480,
-            vertical_total_height: 510,
-            vertical_blank_front_porch: 10,
+            vertical_total_height: 550,
+            vertical_blank_front_porch: 40,
 
-            hsync_width: 10,
-            vsync_width: 10,
+            hsync_width: 9,
+            vsync_width: 9,
 
-            hsync_position: 0,
+            hsync_position: 9,
         })
         .with_vsync_idle_level(Level::High)
         .with_hsync_idle_level(Level::High)
@@ -648,72 +658,47 @@ fn main() -> ! {
     let mut current_pixel = 0;
     let mut dma_tx_buf = dma_tx_buf1;
 
-
-    // Main loop
+    // Main loop to draw the entire image
     loop {
+    for current_line in 0..LCD_V_RES {
+        // Set row address for the current line
+        write_byte(0x2B, true);  // RASET - Row Address Set
 
-        if current_line == 0 && current_pixel == 0 {
+        // Convert current_line to bytes (assuming it fits in 16 bits)
+        let line_high = (current_line >> 8) as u8;
+        let line_low = (current_line & 0xFF) as u8;
 
-            // Update game state
-            update_game_of_life(&mut game_grid);
-            generation += 1;
-            if generation >= RESET_AFTER_GENERATIONS {
-                randomize_grid(&mut rng, &mut game_grid);
-                generation = 0;
-            }
+        // Set row position to current_line
+        write_byte(line_high, false);  // Start row high byte
+        write_byte(line_low, false);   // Start row low byte
+        write_byte(line_high, false);  // End row high byte
+        write_byte(line_low, false);   // End row low byte
 
-            // Clear the framebuffer
-            frame_buf.clear(Rgb565::BLUE).unwrap();
+        // Set or reconfirm column address range (entire width)
+        write_byte(0x2A, true);  // CASET - Column Address Set
+        write_byte(0x00, false); // Start col high byte (0)
+        write_byte(0x00, false); // Start col low byte (0)
+        write_byte(0x01, false); // End col high byte (480 >> 8)
+        write_byte(0xDF, false); // End col low byte (480 & 0xFF)
 
-            // Draw the game grid and generation count
-            draw_grid(&mut frame_buf, &game_grid).unwrap();
-            write_generation(&mut frame_buf, generation).unwrap();
+        // Begin memory write
+        write_byte(0x2C, true);  // RAMWR - Memory Write
 
-            // Overlay centered text
-            let line1 = "Rust no_std ESP32-S3";
-            let line2 = "Conway's Game of Life";
-            let line1_width = line1.len() as i32 * 8;
-            let line2_width = line2.len() as i32 * 8;
-            let x1 = (LCD_H_RES as i32 - line1_width) / 2;
-            let x2 = (LCD_H_RES as i32 - line2_width) / 2;
-            let y = (LCD_V_RES as i32 - 26) / 2;
-
-            Text::new(
-                line1,
-                Point::new(x1, y),
-                MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-            )
-                .draw(&mut frame_buf)
-                .unwrap();
-
-            Text::new(
-                line2,
-                Point::new(x2, y + 14),
-                MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-            )
-                .draw(&mut frame_buf)
-                .unwrap();
-        }
-
-        // Fill the DMA buffer with one line of pixels from the framebuffer
+        // Fill the DMA buffer with data for the current line
         for x in 0..LCD_H_RES as usize {
-            let color = frame_buf.get_color_at(Point::new(x as i32, current_line as i32));
-            let color_u16:u16 =  x as u16 + current_line  as u16;
+
+            let color_u16 = x as u16;
             dma_tx_buf.as_mut_slice()[x*2..x*2+2].copy_from_slice(&color_u16.to_le_bytes());
         }
 
-
-        // Send the buffer to display with proper error handling
+        // Send the buffer to display
         match dpi.send(false, dma_tx_buf) {
             Ok(transfer) => {
                 // Wait for the transfer to complete
                 let (result, dpi_returned, buf_returned) = transfer.wait();
-
-                // Update our variables with the returned values
                 dpi = dpi_returned;
                 dma_tx_buf = buf_returned;
 
-                // Log any errors
                 if let Err(err) = result {
                     error!("DMA transfer error: {:?}", err);
                 }
@@ -725,18 +710,7 @@ fn main() -> ! {
             }
         }
 
-
-        // Update pixel/line counters
-        // if current_pixel >= LCD_H_RES {
-        //     current_pixel = 0;
-            current_line += 1;
-
-            if current_line >= LCD_V_RES {
-                current_line = 0;
-                // Small delay between frames
-                loop_delay.delay_ms(10u32);
-            }
-        // }
-
-    }
+        // Optional small delay between lines
+        loop_delay.delay_ms(1u32);
+    }}
 }
