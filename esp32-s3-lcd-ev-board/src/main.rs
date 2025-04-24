@@ -42,7 +42,7 @@ use esp_hal::{
     rng::Rng,
     time::Rate,
 };
-use esp_println::{logger::init_logger_from_env, println};
+use esp_println::{logger::init_logger_from_env, print, println};
 use log::info;
 use bevy_ecs::prelude::*;
 use mipidsi::interface::ParallelInterface;
@@ -449,62 +449,6 @@ struct FrameBufferResource {
     frame_buf: MyFrameBuf,
 }
 
-// fn render_system(
-//     mut display_res: NonSendMut<DisplayResource>,
-//     game: Res<GameOfLifeResource>,
-//     mut fb_res: ResMut<FrameBufferResource>,
-// ) {
-//     // Clear the framebuffer
-//     fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
-//
-//     // Draw the game grid and generation number
-//     draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
-//     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
-//
-//     // Overlay centered text
-//     let line1 = "Rust no_std ESP32-S3";
-//     let line2 = "Bevy ECS 0.15 no_std";
-//     let line1_width = line1.len() as i32 * 8;
-//     let line2_width = line2.len() as i32 * 8;
-//     let x1 = (LCD_H_RES as i32 - line1_width) / 2 + 14;
-//     let x2 = (LCD_H_RES as i32 - line2_width) / 2 + 14;
-//     let y = (LCD_V_RES as i32 - 26) / 2;
-//
-//     Text::new(
-//         line1,
-//         Point::new(x1, y),
-//         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-//     )
-//         .draw(&mut fb_res.frame_buf)
-//         .unwrap();
-//
-//     Text::new(
-//         line2,
-//         Point::new(x2, y + 14),
-//         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-//     )
-//         .draw(&mut fb_res.frame_buf)
-//         .unwrap();
-//
-//     // Define the area covering the entire framebuffer
-//     let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
-//
-//     // Access the underlying data through our custom HeapBuffer method
-//     // This is a bit hacky, but necessary since we don't have direct access to the data
-//     let fb_data = unsafe {
-//         // Get a reference to the HeapBuffer from the FrameBuf
-//         // This assumes the HeapBuffer is stored directly in the FrameBuf
-//         let frame_buf_ptr = &fb_res.frame_buf as *const _ as *const HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
-//         &*frame_buf_ptr
-//     };
-//
-//     // Use our added method to get a slice of pixels
-//     display_res
-//         .display
-//         .fill_contiguous(&area, fb_data.as_slice().iter().copied())
-//         .unwrap();
-//
-// }
 fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     generation: usize,
@@ -693,7 +637,7 @@ fn main() -> ! {
     }
 
     // Initial transfer
-    let mut transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
+    // let mut transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
     let mut loop_delay = Delay::new();
 
     println!("Starting main loop");
@@ -703,8 +647,6 @@ fn main() -> ! {
 
     // Main loop
     loop {
-        // Wait for previous transfer to complete and get resources back
-        (_, dpi, dma_buf) = transfer.wait();
 
         if current_line == 0 && current_pixel == 0 {
 
@@ -717,7 +659,7 @@ fn main() -> ! {
             }
 
             // Clear the framebuffer
-            frame_buf.clear(Rgb565::BLACK).unwrap();
+            frame_buf.clear(Rgb565::BLUE).unwrap();
 
             // Draw the game grid and generation count
             draw_grid(&mut frame_buf, &game_grid).unwrap();
@@ -773,7 +715,9 @@ fn main() -> ! {
         }
 
         // Start new transfer to the display
-        transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
+        let transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
+        (_, dpi, dma_buf) = transfer.wait();
+
 
         // Update pixel/line counters
         if current_pixel >= LCD_H_RES {
@@ -786,6 +730,7 @@ fn main() -> ! {
                 loop_delay.delay_ms(10u32);
             }
         }
+        println!("tick")
 
     }
 }
