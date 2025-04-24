@@ -508,7 +508,7 @@ fn main() -> ! {
 
     // Create a DMA buffer for sending data to the display
     // 4 scan lines
-    let mut dma_buf = dma_loop_buffer!(2 * 480 * 4);
+    let mut dma_buf = dma_loop_buffer!(2 * 16);
 
     // Configure the RGB display
     let config = Config::default()
@@ -596,6 +596,7 @@ fn main() -> ! {
 
     println!("Starting main loop");
     let mut current_line = 0;
+    let mut current_pixel = 0;
 
 
     // Main loop
@@ -603,7 +604,7 @@ fn main() -> ! {
         // Wait for previous transfer to complete and get resources back
         (_, dpi, dma_buf) = transfer.wait();
 
-        if current_line == 0 {
+        if current_line == 0 && current_pixel == 0 {
 
             // Update game state
             update_game_of_life(&mut game_grid);
@@ -646,48 +647,42 @@ fn main() -> ! {
                 .unwrap();
         }
 
-        // Calculate how many lines we can fit in the DMA buffer
-        let line_bytes = LCD_H_RES as usize * 2;  // Each pixel is 2 bytes
-        let lines_per_transfer = dma_buf.len() / line_bytes;
+        // Calculate how many pixels we can send at once
+        let pixels_per_transfer = dma_buf.len() / 2; // Each pixel is 2 bytes
 
-        // Make sure we don't go past the end of the screen
-        let lines_to_draw = core::cmp::min(lines_per_transfer, LCD_V_RES as usize - current_line);
+        // Fill the DMA buffer with pixels
+        for i in 0..pixels_per_transfer {
+            if current_pixel < LCD_H_RES {
+                // Get the correct color from the framebuffer
+                let color = frame_buf.get_color_at(Point::new(current_pixel as i32, current_line as i32));
 
-        // Fill DMA buffer with the next set of lines from the framebuffer
-        for line_offset in 0..lines_to_draw {
-            let y = current_line + line_offset;
-            for x in 0..LCD_H_RES as usize {
-                // Calculate source index in framebuffer
-                let fb_idx = y * LCD_H_RES as usize + x;
-
-                // Calculate destination index in DMA buffer
-                let dma_idx = line_offset * line_bytes + x * 2;
-
-                // Get pixel color from framebuffer
-                let color = frame_buf.get_color_at(Point::new(x as i32, y as i32));
-
-                // Convert to bytes and write to DMA buffer
-                // NOTE: Try both byte orders if one doesn't work
+                // Convert to u16 and write to DMA buffer
                 let color_u16 = rgb565_to_u16(color);
 
-                // Try this byte order first:
-                dma_buf[dma_idx..dma_idx+2].copy_from_slice(&color_u16.to_be_bytes());
+                // Try different byte orders
+                // dma_buf[i*2..i*2+2].copy_from_slice(&color_u16.to_be_bytes());
+                dma_buf[i*2..i*2+2].copy_from_slice(&color_u16.to_le_bytes());
 
-                // If the above doesn't work, try this alternate byte order:
-                // dma_buf[dma_idx..dma_idx+2].copy_from_slice(&color_u16.to_le_bytes());
+                current_pixel += 1;
+            } else {
+                // Fill remaining buffer with black if we've reached the end of the line
+                dma_buf[i*2..i*2+2].copy_from_slice(&0u16.to_le_bytes());
             }
         }
 
         // Start new transfer to the display
         transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
 
-        // Update the current line for the next iteration
-        current_line += lines_to_draw;
-        if current_line >= LCD_V_RES as usize {
-            current_line = 0;  // Reset to start of screen
+        // Update pixel/line counters
+        if current_pixel >= LCD_H_RES {
+            current_pixel = 0;
+            current_line += 1;
 
-            // Add a small delay between full frames
-            loop_delay.delay_ms(10u32);
+            if current_line >= LCD_V_RES as usize {
+                current_line = 0;
+                // Small delay between frames
+                loop_delay.delay_ms(10u32);
+            }
         }
 
     }
