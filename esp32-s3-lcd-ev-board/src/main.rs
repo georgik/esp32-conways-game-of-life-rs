@@ -610,7 +610,7 @@ fn main() -> ! {
 
     // Create a DMA buffer for sending data to the display
     // 4 scan lines
-    let mut dma_buf = dma_loop_buffer!(2 * 16);
+    let mut dma_buf = dma_loop_buffer!(2 * 480);
 
     // Configure the RGB display
     let config = Config::default()
