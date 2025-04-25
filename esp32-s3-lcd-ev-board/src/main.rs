@@ -655,16 +655,14 @@ fn main() -> ! {
     let mut loop_delay = Delay::new();
 
     println!("Starting main loop");
-    let mut current_line = 0;
-    let mut current_pixel = 0;
+
     let mut dma_tx_buf = dma_tx_buf1;
-    let mut iteration = 0;
-
-
 
     // Main loop to draw the entire image
     loop {
         // Render Conway
+        // Update the game of life grid
+        update_game_of_life(&mut game_grid);
         // Draw the game grid
         draw_grid(&mut frame_buf, &game_grid).unwrap();
 
