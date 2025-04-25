@@ -566,7 +566,8 @@ fn main() -> ! {
     let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2*4);
 
     let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
-    println!("DMA buffer size: {} bytes", dma_tx_buf1.len());
+    let dma_buf_len = dma_tx_buf1.len();
+    println!("DMA buffer size: {} bytes", dma_buf_len);
 
 
     // Configure the RGB display
@@ -657,34 +658,40 @@ fn main() -> ! {
     let mut current_line = 0;
     let mut current_pixel = 0;
     let mut dma_tx_buf = dma_tx_buf1;
+    let mut iteration = 0;
 
     // Main loop to draw the entire image
     loop {
+        iteration += 1;
+
+
+        let color_u16 = iteration as u16;
+        dma_tx_buf.as_mut_slice()[iteration*2..iteration*2+2].copy_from_slice(&color_u16.to_le_bytes());
 
         // Fill the DMA buffer with data for the current line
-        for x in 0..LCD_H_RES as usize {
-            let color_u16 = x as u16;
-            dma_tx_buf.as_mut_slice()[x * 2..x * 2 + 2]
-                .copy_from_slice(&color_u16.to_le_bytes());
-        }
-        // Fill the DMA buffer with data for the current line
-        for x in 0..LCD_H_RES as usize {
-            let color_u16:u16 = x as u16;
-            dma_tx_buf.as_mut_slice()[(x * 2)+LCD_H_RES as usize..(x * 2 + 2)+LCD_H_RES as usize]
-                .copy_from_slice(&color_u16.to_le_bytes());
-        }
-
-        for x in 0..LCD_H_RES as usize {
-            let color_u16:u16 = x as u16;
-            dma_tx_buf.as_mut_slice()[(x * 2)+2*LCD_H_RES as usize..(x * 2 + 2)+2*LCD_H_RES as usize]
-                .copy_from_slice(&color_u16.to_le_bytes());
-        }
-
-        for x in 0..LCD_H_RES as usize {
-            let color_u16:u16 = x as u16;
-            dma_tx_buf.as_mut_slice()[(x * 2)+3*LCD_H_RES as usize..(x * 2 + 2)+3*LCD_H_RES as usize]
-                .copy_from_slice(&color_u16.to_le_bytes());
-        }
+        // for x in 0..LCD_H_RES as usize {
+        //     let color_u16 = x as u16;
+        //     dma_tx_buf.as_mut_slice()[x * 2..x * 2 + 2]
+        //         .copy_from_slice(&color_u16.to_le_bytes());
+        // }
+        // // Fill the DMA buffer with data for the current line
+        // for x in 0..LCD_H_RES as usize {
+        //     let color_u16:u16 = x as u16;
+        //     dma_tx_buf.as_mut_slice()[(x * 2)+LCD_H_RES as usize..(x * 2 + 2)+LCD_H_RES as usize]
+        //         .copy_from_slice(&color_u16.to_le_bytes());
+        // }
+        //
+        // for x in 0..LCD_H_RES as usize {
+        //     let color_u16:u16 = x as u16;
+        //     dma_tx_buf.as_mut_slice()[(x * 2)+2*LCD_H_RES as usize..(x * 2 + 2)+2*LCD_H_RES as usize]
+        //         .copy_from_slice(&color_u16.to_le_bytes());
+        // }
+        //
+        // for x in 0..LCD_H_RES as usize {
+        //     let color_u16:u16 = x as u16;
+        //     dma_tx_buf.as_mut_slice()[(x * 2)+3*LCD_H_RES as usize..(x * 2 + 2)+3*LCD_H_RES as usize]
+        //         .copy_from_slice(&color_u16.to_le_bytes());
+        // }
 
 
         // Send the buffer to display
