@@ -563,7 +563,7 @@ fn main() -> ! {
 
     // Create a DMA buffer for sending data to the display
     // 4 scan lines
-    let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2*4);
+    let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2*200);
 
     let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
     let dma_buf_len = dma_tx_buf1.len();
@@ -660,39 +660,25 @@ fn main() -> ! {
     let mut dma_tx_buf = dma_tx_buf1;
     let mut iteration = 0;
 
+
+
     // Main loop to draw the entire image
     loop {
-        iteration += 1;
+        // Render Conway
+        // Draw the game grid
+        draw_grid(&mut frame_buf, &game_grid).unwrap();
 
+        let mut item_index = 0;
 
-        let color_u16 = iteration as u16;
-        dma_tx_buf.as_mut_slice()[iteration*2..iteration*2+2].copy_from_slice(&color_u16.to_le_bytes());
+        for pixel in frame_buf.data.iter_mut() {
 
-        // Fill the DMA buffer with data for the current line
-        // for x in 0..LCD_H_RES as usize {
-        //     let color_u16 = x as u16;
-        //     dma_tx_buf.as_mut_slice()[x * 2..x * 2 + 2]
-        //         .copy_from_slice(&color_u16.to_le_bytes());
-        // }
-        // // Fill the DMA buffer with data for the current line
-        // for x in 0..LCD_H_RES as usize {
-        //     let color_u16:u16 = x as u16;
-        //     dma_tx_buf.as_mut_slice()[(x * 2)+LCD_H_RES as usize..(x * 2 + 2)+LCD_H_RES as usize]
-        //         .copy_from_slice(&color_u16.to_le_bytes());
-        // }
-        //
-        // for x in 0..LCD_H_RES as usize {
-        //     let color_u16:u16 = x as u16;
-        //     dma_tx_buf.as_mut_slice()[(x * 2)+2*LCD_H_RES as usize..(x * 2 + 2)+2*LCD_H_RES as usize]
-        //         .copy_from_slice(&color_u16.to_le_bytes());
-        // }
-        //
-        // for x in 0..LCD_H_RES as usize {
-        //     let color_u16:u16 = x as u16;
-        //     dma_tx_buf.as_mut_slice()[(x * 2)+3*LCD_H_RES as usize..(x * 2 + 2)+3*LCD_H_RES as usize]
-        //         .copy_from_slice(&color_u16.to_le_bytes());
-        // }
-
+            dma_tx_buf.as_mut_slice()[item_index*2..item_index*2+2]
+                .copy_from_slice(&pixel.into_storage().to_le_bytes());
+            item_index += 1;
+            if item_index*2 >= dma_tx_buf.len() {
+                break;
+            }
+        }
 
         // Send the buffer to display
         match dpi.send(false, dma_tx_buf) {
