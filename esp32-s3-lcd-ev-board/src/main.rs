@@ -539,7 +539,7 @@ fn main() -> ! {
     // VSYNC must be high during initialization
     let mut vsync_pin = peripherals.GPIO3;
     let vsync_must_be_high_during_setup =
-        Output::new(&mut vsync_pin, Level::High, OutputConfig::default());
+        Output::new(vsync_pin.reborrow(), Level::High, OutputConfig::default());
 
     // Initialize the display by sending the initialization commands
     for &init in INIT_CMDS.iter() {
@@ -563,7 +563,7 @@ fn main() -> ! {
 
     // Create a DMA buffer for sending data to the display
     // 4 scan lines
-    let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2);
+    let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2*4);
 
     let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
     println!("DMA buffer size: {} bytes", dma_tx_buf1.len());
@@ -602,7 +602,7 @@ fn main() -> ! {
     // Initialize the DPI interface with all the pins
     let mut dpi = Dpi::new(lcd_cam.lcd, tx_channel, config)
         .unwrap()
-        .with_vsync(vsync_pin)
+        .with_vsync(vsync_pin.reborrow())
         .with_hsync(peripherals.GPIO46)
         .with_de(peripherals.GPIO17)
         .with_pclk(peripherals.GPIO9)
@@ -660,36 +660,32 @@ fn main() -> ! {
 
     // Main loop to draw the entire image
     loop {
-    for current_line in 0..LCD_V_RES {
-        // Set row address for the current line
-        write_byte(0x2B, true);  // RASET - Row Address Set
-
-        // Convert current_line to bytes (assuming it fits in 16 bits)
-        let line_high = (current_line >> 8) as u8;
-        let line_low = (current_line & 0xFF) as u8;
-
-        // Set row position to current_line
-        write_byte(line_high, false);  // Start row high byte
-        write_byte(line_low, false);   // Start row low byte
-        write_byte(line_high, false);  // End row high byte
-        write_byte(line_low, false);   // End row low byte
-
-        // Set or reconfirm column address range (entire width)
-        write_byte(0x2A, true);  // CASET - Column Address Set
-        write_byte(0x00, false); // Start col high byte (0)
-        write_byte(0x00, false); // Start col low byte (0)
-        write_byte(0x01, false); // End col high byte (480 >> 8)
-        write_byte(0xDF, false); // End col low byte (480 & 0xFF)
-
-        // Begin memory write
-        write_byte(0x2C, true);  // RAMWR - Memory Write
 
         // Fill the DMA buffer with data for the current line
         for x in 0..LCD_H_RES as usize {
-
             let color_u16 = x as u16;
-            dma_tx_buf.as_mut_slice()[x*2..x*2+2].copy_from_slice(&color_u16.to_le_bytes());
+            dma_tx_buf.as_mut_slice()[x * 2..x * 2 + 2]
+                .copy_from_slice(&color_u16.to_le_bytes());
         }
+        // Fill the DMA buffer with data for the current line
+        for x in 0..LCD_H_RES as usize {
+            let color_u16:u16 = x as u16;
+            dma_tx_buf.as_mut_slice()[(x * 2)+LCD_H_RES as usize..(x * 2 + 2)+LCD_H_RES as usize]
+                .copy_from_slice(&color_u16.to_le_bytes());
+        }
+
+        for x in 0..LCD_H_RES as usize {
+            let color_u16:u16 = x as u16;
+            dma_tx_buf.as_mut_slice()[(x * 2)+2*LCD_H_RES as usize..(x * 2 + 2)+2*LCD_H_RES as usize]
+                .copy_from_slice(&color_u16.to_le_bytes());
+        }
+
+        for x in 0..LCD_H_RES as usize {
+            let color_u16:u16 = x as u16;
+            dma_tx_buf.as_mut_slice()[(x * 2)+3*LCD_H_RES as usize..(x * 2 + 2)+3*LCD_H_RES as usize]
+                .copy_from_slice(&color_u16.to_le_bytes());
+        }
+
 
         // Send the buffer to display
         match dpi.send(false, dma_tx_buf) {
@@ -702,7 +698,7 @@ fn main() -> ! {
                 if let Err(err) = result {
                     error!("DMA transfer error: {:?}", err);
                 }
-            },
+            }
             Err((err, dpi_returned, buf_returned)) => {
                 error!("Failed to send DMA buffer: {:?}", err);
                 dpi = dpi_returned;
@@ -710,7 +706,7 @@ fn main() -> ! {
             }
         }
 
-        // Optional small delay between lines
+        // Optional small delay between lines for stability
         loop_delay.delay_ms(1u32);
-    }}
+    }
 }
