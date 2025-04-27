@@ -227,7 +227,7 @@ const INIT_CMDS: &[InitCmd] = &[
     // Set full row address range
     InitCmd::Cmd(0x2B, &[0x00, 0x00, 0x01, 0xDF]),  // 0 to 479 (0x1DF)
 
-    InitCmd::Cmd(0x3A, &[0x66]),
+    InitCmd::Cmd(0x3A, &[0x55]), // CORRECT: 16bpp (5:6:5) !!!
     InitCmd::Cmd(0x11, &[]),
     InitCmd::Delay(120),
     InitCmd::Cmd(0x29, &[]),
@@ -686,12 +686,22 @@ fn main() -> ! {
             let y0 = stripe * LINES_PER_CHUNK;
             let y1 = y0 + LINES_PER_CHUNK - 1;
 
-            // 1) set the row address window for this chunk:
+            // 1) column window (CASET)
+            write_byte(0x2A, true);
+            write_byte(0x00, false);                   // X start high
+            write_byte(0x00, false);                   // X start low
+            write_byte(((LCD_H_RES-1) >> 8) as u8, false); // X end   high (0x01)
+            write_byte(((LCD_H_RES-1) & 0xFF) as u8, false);// X end   low  (0xDF)
+
+            // 2) row    window (PASET)
             write_byte(0x2B, true);
             write_byte(((y0 >> 8) & 0xFF) as u8, false);
             write_byte(( y0       & 0xFF) as u8, false);
             write_byte(((y1 >> 8) & 0xFF) as u8, false);
             write_byte(( y1       & 0xFF) as u8, false);
+
+            // 3) RAM-write
+            write_byte(0x2C, true);
 
             // 2) fill the DMA buffer with exactly LINES_PER_CHUNK scan-lines of pixels:
             let src = &frame_buf.data[y0 * LCD_H_RES as usize .. (y1+1) * LCD_H_RES as usize];
