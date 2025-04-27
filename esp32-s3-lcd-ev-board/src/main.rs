@@ -562,12 +562,15 @@ fn main() -> ! {
     let lcd_cam = LcdCam::new(peripherals.LCD_CAM);
 
     // Create a DMA buffer for sending data to the display
-    // 4 scan lines
-    let (rx_buffer1, rx_descriptors1, tx_buffer1, tx_descriptors1) = dma_buffers!((LCD_H_RES as usize) * 2*200);
+    const LINES_PER_CHUNK: usize = 4;
+    // each pixel is 2 bytes, so:
+    const CHUNK_BYTES: usize = LCD_H_RES as usize * LINES_PER_CHUNK * 2;
+    let ( _rx, _rx_desc, tx_buf, tx_desc ) = dma_buffers!(CHUNK_BYTES);
+    let mut dma_tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
 
-    let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
-    let dma_buf_len = dma_tx_buf1.len();
-    println!("DMA buffer size: {} bytes", dma_buf_len);
+    // let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
+    // let dma_buf_len = dma_tx_buf1.len();
+    // println!("DMA buffer size: {} bytes", dma_buf_len);
 
 
     // Configure the RGB display
@@ -656,7 +659,8 @@ fn main() -> ! {
 
     println!("Starting main loop");
 
-    let mut dma_tx_buf = dma_tx_buf1;
+    // let mut dma_tx_buf = dma_tx_buf1;
+    let mut write_byte = write_byte;
 
     // Main loop to draw the entire image
     loop {
@@ -668,33 +672,56 @@ fn main() -> ! {
 
         let mut item_index = 0;
 
-        for pixel in frame_buf.data.iter_mut() {
+        // for pixel in frame_buf.data.iter_mut() {
+        //
+        //     dma_tx_buf.as_mut_slice()[item_index*2..item_index*2+2]
+        //         .copy_from_slice(&pixel.into_storage().to_le_bytes());
+        //     item_index += 1;
+        //     if item_index*2 >= dma_tx_buf.len() {
+        //         break;
+        //     }
+        // }
 
-            dma_tx_buf.as_mut_slice()[item_index*2..item_index*2+2]
-                .copy_from_slice(&pixel.into_storage().to_le_bytes());
-            item_index += 1;
-            if item_index*2 >= dma_tx_buf.len() {
-                break;
+        for stripe in 0..(LCD_V_RES as usize / LINES_PER_CHUNK) {
+            let y0 = stripe * LINES_PER_CHUNK;
+            let y1 = y0 + LINES_PER_CHUNK - 1;
+
+            // 1) set the row address window for this chunk:
+            write_byte(0x2B, true);
+            write_byte(((y0 >> 8) & 0xFF) as u8, false);
+            write_byte(( y0       & 0xFF) as u8, false);
+            write_byte(((y1 >> 8) & 0xFF) as u8, false);
+            write_byte(( y1       & 0xFF) as u8, false);
+
+            // 2) fill the DMA buffer with exactly LINES_PER_CHUNK scan-lines of pixels:
+            let src = &frame_buf.data[y0 * LCD_H_RES as usize .. (y1+1) * LCD_H_RES as usize];
+            let dst = dma_tx.as_mut_slice();
+            for (i, px) in src.iter().enumerate() {
+                let b = px.into_storage().to_le_bytes();
+                dst[i*2    ] = b[0];
+                dst[i*2 + 1] = b[1];
             }
-        }
 
-        // Send the buffer to display
-        match dpi.send(false, dma_tx_buf) {
-            Ok(transfer) => {
-                // Wait for the transfer to complete
-                let (result, dpi_returned, buf_returned) = transfer.wait();
-                dpi = dpi_returned;
-                dma_tx_buf = buf_returned;
-
-                if let Err(err) = result {
-                    error!("DMA transfer error: {:?}", err);
+            // 3) send it in one one-shot
+            let transfer = match dpi.send(false, dma_tx) {
+                Ok(tr) => tr,
+                Err((err, dpi_ret, buf_ret)) => {
+                    error!("Failed to start DMA chunk: {:?}", err);
+                    // restore ownership so we can try again next stripe/frame
+                    dpi   = dpi_ret;
+                    dma_tx = buf_ret;
+                    continue;   // skip this stripe and go on to the next
                 }
+            };
+
+            // wait for the chunk to finish
+            let (res, dpi_ret, buf_ret) = transfer.wait();
+            if let Err(e) = res {
+                error!("DMA chunk error: {:?}", e);
             }
-            Err((err, dpi_returned, buf_returned)) => {
-                error!("Failed to send DMA buffer: {:?}", err);
-                dpi = dpi_returned;
-                dma_tx_buf = buf_returned;
-            }
+            // restore ownership for the next iteration
+            dpi   = dpi_ret;
+            dma_tx = buf_ret;
         }
 
         // Optional small delay between lines for stability
