@@ -227,7 +227,7 @@ const INIT_CMDS: &[InitCmd] = &[
     // Set full row address range
     InitCmd::Cmd(0x2B, &[0x00, 0x00, 0x01, 0xDF]),  // 0 to 479 (0x1DF)
 
-    InitCmd::Cmd(0x3A, &[0x55]), // CORRECT: 16bpp (5:6:5) !!!
+    InitCmd::Cmd(0x3A, &[0x66]),
     InitCmd::Cmd(0x11, &[]),
     InitCmd::Delay(120),
     InitCmd::Cmd(0x29, &[]),
@@ -565,8 +565,8 @@ fn main() -> ! {
     const LINES_PER_CHUNK: usize = 4;
     // each pixel is 2 bytes, so:
     const CHUNK_BYTES: usize = LCD_H_RES as usize * LINES_PER_CHUNK * 2;
-    let ( _rx, _rx_desc, tx_buf, tx_desc ) = dma_buffers!(CHUNK_BYTES);
-    let mut dma_tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
+    // let ( _rx, _rx_desc, tx_buf, tx_desc ) = dma_buffers!(CHUNK_BYTES);
+    // let mut dma_tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
 
     // let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
     // let dma_buf_len = dma_tx_buf1.len();
@@ -659,82 +659,111 @@ fn main() -> ! {
 
     println!("Starting main loop");
 
+    const HALF_LINES: usize = (LCD_V_RES as usize) / 2;
+    const HALF_BYTES: usize = HALF_LINES * (LCD_H_RES as usize) * 2;
+
+    // allocate one PSRAM-backed “half-frame” DMA buffer
+    let ( _rx, _rx_desc, tx_buf_half, tx_desc_half ) = dma_buffers!(HALF_BYTES);
+    let mut dma_tx = DmaTxBuf::new(tx_desc_half, tx_buf_half).unwrap();
     // let mut dma_tx_buf = dma_tx_buf1;
     let mut write_byte = write_byte;
 
     // Main loop to draw the entire image
     loop {
-        // Render Conway
-        // Update the game of life grid
+        // 1) Update & draw Game of Life
         update_game_of_life(&mut game_grid);
-        // Draw the game grid
         draw_grid(&mut frame_buf, &game_grid).unwrap();
 
-        let mut item_index = 0;
-
-        // for pixel in frame_buf.data.iter_mut() {
-        //
-        //     dma_tx_buf.as_mut_slice()[item_index*2..item_index*2+2]
-        //         .copy_from_slice(&pixel.into_storage().to_le_bytes());
-        //     item_index += 1;
-        //     if item_index*2 >= dma_tx_buf.len() {
-        //         break;
-        //     }
-        // }
-
-        for stripe in 0..(LCD_V_RES as usize / LINES_PER_CHUNK) {
-            let y0 = stripe * LINES_PER_CHUNK;
-            let y1 = y0 + LINES_PER_CHUNK - 1;
-
-            // 1) column window (CASET)
-            write_byte(0x2A, true);
-            write_byte(0x00, false);                   // X start high
-            write_byte(0x00, false);                   // X start low
-            write_byte(((LCD_H_RES-1) >> 8) as u8, false); // X end   high (0x01)
-            write_byte(((LCD_H_RES-1) & 0xFF) as u8, false);// X end   low  (0xDF)
-
-            // 2) row    window (PASET)
-            write_byte(0x2B, true);
-            write_byte(((y0 >> 8) & 0xFF) as u8, false);
-            write_byte(( y0       & 0xFF) as u8, false);
-            write_byte(((y1 >> 8) & 0xFF) as u8, false);
-            write_byte(( y1       & 0xFF) as u8, false);
-
-            // 3) RAM-write
-            write_byte(0x2C, true);
-
-            // 2) fill the DMA buffer with exactly LINES_PER_CHUNK scan-lines of pixels:
-            let src = &frame_buf.data[y0 * LCD_H_RES as usize .. (y1+1) * LCD_H_RES as usize];
+        // --- Top‐half chunk (lines 0…239) ---
+        {
+            // Copy pixels into DMA buffer
+            let src = &frame_buf.data[0 .. HALF_LINES * LCD_H_RES as usize];
             let dst = dma_tx.as_mut_slice();
             for (i, px) in src.iter().enumerate() {
-                let b = px.into_storage().to_le_bytes();
-                dst[i*2    ] = b[0];
-                dst[i*2 + 1] = b[1];
+                let bytes = px.into_storage().to_le_bytes();
+                dst[2*i    ] = bytes[0];
+                dst[2*i + 1] = bytes[1];
             }
 
-            // 3) send it in one one-shot
-            let transfer = match dpi.send(false, dma_tx) {
-                Ok(tr) => tr,
-                Err((err, dpi_ret, buf_ret)) => {
-                    error!("Failed to start DMA chunk: {:?}", err);
-                    // restore ownership so we can try again next stripe/frame
-                    dpi   = dpi_ret;
-                    dma_tx = buf_ret;
-                    continue;   // skip this stripe and go on to the next
+            // Column window: X=0…479
+            write_byte(0x2A, true);
+            write_byte(0, false);
+            write_byte(0, false);
+            write_byte(((LCD_H_RES - 1) >> 8)  as u8, false);
+            write_byte(((LCD_H_RES - 1) & 0xFF) as u8, false);
+
+            // Row window: Y=0…239
+            write_byte(0x2B, true);
+            write_byte(0, false);
+            write_byte(0, false);
+            write_byte(((HALF_LINES - 1) >> 8)  as u8, false);
+            write_byte(((HALF_LINES - 1) & 0xFF) as u8, false);
+
+            // RAM‐write
+            write_byte(0x2C, true);
+
+            // Send & wait, handling errors
+            match dpi.send(false, dma_tx) {
+                Ok(xfer) => {
+                    let (res, dpi2, buf2) = xfer.wait();
+                    dpi    = dpi2;
+                    dma_tx = buf2;
+                    if let Err(e) = res {
+                        error!("Top‐half DMA transfer error: {:?}", e);
+                    }
                 }
-            };
-
-            // wait for the chunk to finish
-            let (res, dpi_ret, buf_ret) = transfer.wait();
-            if let Err(e) = res {
-                error!("DMA chunk error: {:?}", e);
+                Err((e, dpi2, buf2)) => {
+                    error!("Top‐half DMA send error: {:?}", e);
+                    dpi    = dpi2;
+                    dma_tx = buf2;
+                }
             }
-            // restore ownership for the next iteration
-            dpi   = dpi_ret;
-            dma_tx = buf_ret;
         }
 
-        // Optional small delay between lines for stability
-        loop_delay.delay_ms(1u32);
+        // --- Bottom‐half chunk (lines 240…479) ---
+        {
+            // Copy pixels into DMA buffer
+            let src = &frame_buf.data[HALF_LINES * LCD_H_RES as usize ..];
+            let dst = dma_tx.as_mut_slice();
+            for (i, px) in src.iter().enumerate() {
+                let bytes = px.into_storage().to_le_bytes();
+                dst[2*i    ] = bytes[0];
+                dst[2*i + 1] = bytes[1];
+            }
+
+            // Column window: X=0…479
+            write_byte(0x2A, true);
+            write_byte(0, false);
+            write_byte(0, false);
+            write_byte(((LCD_H_RES - 1) >> 8)  as u8, false);
+            write_byte(((LCD_H_RES - 1) & 0xFF) as u8, false);
+
+            // Row window: Y=240…479
+            write_byte(0x2B, true);
+            write_byte((HALF_LINES >> 8)  as u8, false); // Y start = 240
+            write_byte((HALF_LINES & 0xFF) as u8, false);
+            write_byte(((LCD_V_RES - 1) >> 8)  as u8, false); // Y end = 479
+            write_byte(((LCD_V_RES - 1) & 0xFF) as u8, false);
+
+            // RAM‐write
+            write_byte(0x2C, true);
+
+            // Send & wait, handling errors
+            match dpi.send(false, dma_tx) {
+                Ok(xfer) => {
+                    let (res, dpi2, buf2) = xfer.wait();
+                    dpi    = dpi2;
+                    dma_tx = buf2;
+                    if let Err(e) = res {
+                        error!("Bottom‐half DMA transfer error: {:?}", e);
+                    }
+                }
+                Err((e, dpi2, buf2)) => {
+                    error!("Bottom‐half DMA send error: {:?}", e);
+                    dpi    = dpi2;
+                    dma_tx = buf2;
+                }
+            }
+        }
     }
 }
