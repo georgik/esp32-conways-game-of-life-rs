@@ -110,6 +110,70 @@ cd esp32-s3-box-3
 cargo run --release
 ```
 
+### ESP32-S3-LCD-Ev-Board
+
+![ESP32 Conways Game of Life in Rust - ESP32-S3-LCD-Ev-Board with Bevy ECS](esp32-s3-lcd-ev-board-conway.jpg)
+
+[ESP32-S3-LCD-Ev-Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-lcd-ev-board/index.html)
+is more complex when it comes to the display. Initialization sequence for the display is:
+- initialize I2C
+- tunnel SPI commands via I2C bus
+- configure 16 GPIOs to transfer data
+- all data must be transferred in one transaction (requires PSRAM)
+
+The timing of the display must be precise, otherwise incorrect data will be displayed.
+
+Working configuration of timing:
+
+```rust
+    // Configure the RGB display
+    let config = Config::default()
+        .with_clock_mode(ClockMode {
+            polarity: Polarity::IdleLow,
+            phase: Phase::ShiftLow,
+        })
+        .with_frequency(Rate::from_mhz(10))
+        .with_format(Format {
+            enable_2byte_mode: true,
+            ..Default::default()
+        })
+        .with_timing(FrameTiming {
+            // active region
+            horizontal_active_width: 480,
+            vertical_active_height: 480,
+            // extend total timings for larger porch intervals
+            horizontal_total_width: 600, // allow long back/front porch
+            horizontal_blank_front_porch: 80,
+            vertical_total_height: 600,  // allow longer vertical blank
+            vertical_blank_front_porch: 80,
+            // maintain sync widths
+            hsync_width: 10,
+            vsync_width: 4,
+            // place HSYNC pulse well before active data
+            hsync_position: 10,
+        })
+        .with_vsync_idle_level(Level::High)
+        .with_hsync_idle_level(Level::High)
+        .with_de_idle_level(Level::Low)
+        .with_disable_black_region(false);
+```
+
+This is only bare metal implementation, does not contain Bevy ECS in this version.
+
+```
+cargo install espup
+espup install --toolchain-version 1.85.0.0
+source ~/export-esp.sh
+```
+
+Build:
+
+```
+cd esp32-s3-box-3
+cargo run --release
+```
+
+
 ### ESP32-C3-LCDKit
 
 ![ESP32 Conways Game of Life in Rust - ESP32-C3-LCDkit with Bevy ECS](esp32-c3-lcdkit-conway.jpg)
