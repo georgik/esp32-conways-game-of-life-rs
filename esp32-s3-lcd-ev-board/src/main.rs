@@ -21,7 +21,7 @@ use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
-use esp_hal::dma::{DmaDescriptor, DmaRxBuf, DmaTxBuf};
+use esp_hal::dma::{DmaDescriptor, DmaRxBuf, DmaTxBuf, CHUNK_SIZE};
 use esp_hal::dma_buffers;
 use esp_hal::i2c::{self, master::I2c};
 use esp_hal::lcd_cam::{
@@ -458,6 +458,18 @@ struct FrameBufferResource {
     frame_buf: MyFrameBuf,
 }
 
+// use esp_hal::dma::{DmaDescriptor, DmaTxBuf};
+
+// Size of the entire frame in bytes (2 bytes per pixel)
+const FRAME_BYTES: usize = BUFFER_SIZE * 2;
+// Number of descriptors needed, each up to CHUNK_SIZE (4095)
+const NUM_DMA_DESC: usize = (FRAME_BYTES + CHUNK_SIZE - 1) / CHUNK_SIZE;
+
+/// Place the descriptor(s) in DMA-capable RAM.
+#[unsafe(link_section = ".dma")]
+static mut TX_DESCRIPTORS: [DmaDescriptor; NUM_DMA_DESC] =
+    [DmaDescriptor::EMPTY; NUM_DMA_DESC];
+
 fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     generation: usize,
@@ -579,24 +591,25 @@ fn main() -> ! {
             polarity: Polarity::IdleLow,
             phase: Phase::ShiftLow,
         })
-        .with_frequency(Rate::from_mhz(16))
+        .with_frequency(Rate::from_mhz(10))
         .with_format(Format {
             enable_2byte_mode: true,
             ..Default::default()
         })
         .with_timing(FrameTiming {
+            // active region
             horizontal_active_width: 480,
-            horizontal_total_width: 550,
-            horizontal_blank_front_porch: 40,
-
             vertical_active_height: 480,
-            vertical_total_height: 550,
-            vertical_blank_front_porch: 40,
-
-            hsync_width: 9,
-            vsync_width: 9,
-
-            hsync_position: 9,
+            // extend total timings for larger porch intervals
+            horizontal_total_width: 600,          // allow long back/front porch
+            horizontal_blank_front_porch: 80,    // plenty of front porch
+            vertical_total_height: 600,          // allow longer vertical blank
+            vertical_blank_front_porch: 80,      // plenty of vertical blank porch
+            // maintain sync widths
+            hsync_width: 10,
+            vsync_width: 4,
+            // place HSYNC pulse well before active data
+            hsync_position: 10,
         })
         .with_vsync_idle_level(Level::High)
         .with_hsync_idle_level(Level::High)
@@ -659,74 +672,41 @@ fn main() -> ! {
 
     println!("Starting main loop");
 
-    const HALF_LINES: usize = (LCD_V_RES as usize) / 2;
-    const HALF_BYTES: usize = HALF_LINES * (LCD_H_RES as usize) * 2;
+    const FRAME_BYTES: usize = BUFFER_SIZE * 2;
+    let buf_box: Box<[u8; FRAME_BYTES]> = Box::new([0; FRAME_BYTES]);
+    // Box::leak turns it into a &'static mut [u8]
+    let psram_buf: &'static mut [u8] = Box::leak(buf_box);
 
-    // allocate one PSRAM-backed “half-frame” DMA buffer
-    let ( _rx, _rx_desc, tx_buf_half, tx_desc_half ) = dma_buffers!(HALF_BYTES);
-    let mut dma_tx = DmaTxBuf::new(tx_desc_half, tx_buf_half).unwrap();
+    // Tie to descriptor set for one-shot DMA
+    let mut dma_tx: DmaTxBuf = unsafe {
+        DmaTxBuf::new(&mut TX_DESCRIPTORS[..], psram_buf).unwrap()
+    };
 
     // Main loop to draw the entire image
     loop {
-        // 1) Update & draw Game of Life
         update_game_of_life(&mut game_grid);
         draw_grid(&mut frame_buf, &game_grid).unwrap();
 
-        // --- Top‐half chunk (lines 0…239) ---
-        {
-            // Copy pixels into DMA buffer
-            let src = &frame_buf.data[0 .. HALF_LINES * LCD_H_RES as usize];
-            let dst = dma_tx.as_mut_slice();
-            for (i, px) in src.iter().enumerate() {
-                let bytes = px.into_storage().to_le_bytes();
-                dst[2*i    ] = bytes[0];
-                dst[2*i + 1] = bytes[1];
-            }
-
-            // Send & wait, handling errors
-            match dpi.send(false, dma_tx) {
-                Ok(xfer) => {
-                    let (res, dpi2, buf2) = xfer.wait();
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                    if let Err(e) = res {
-                        error!("Top‐half DMA transfer error: {:?}", e);
-                    }
-                }
-                Err((e, dpi2, buf2)) => {
-                    error!("Top‐half DMA send error: {:?}", e);
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                }
-            }
+        // Pack entire frame into PSRAM DMA buffer
+        let dst = dma_tx.as_mut_slice();
+        for (i, px) in frame_buf.data.iter().enumerate() {
+            let [lo, hi] = px.into_storage().to_le_bytes();
+            dst[2*i    ] = lo;
+            dst[2*i + 1] = hi;
         }
 
-        // --- Bottom‐half chunk (lines 240…479) ---
-        {
-            // Copy pixels into DMA buffer
-            let src = &frame_buf.data[HALF_LINES * LCD_H_RES as usize ..];
-            let dst = dma_tx.as_mut_slice();
-            for (i, px) in src.iter().enumerate() {
-                let bytes = px.into_storage().to_le_bytes();
-                dst[2*i    ] = bytes[0];
-                dst[2*i + 1] = bytes[1];
+        // One-shot transfer
+        match dpi.send(false, dma_tx) {
+            Ok(xfer) => {
+                let (res, dpi2, buf2) = xfer.wait();
+                dpi    = dpi2;
+                dma_tx = buf2;
+                if let Err(e) = res { error!("DMA error: {:?}", e); }
             }
-
-            // Send & wait, handling errors
-            match dpi.send(false, dma_tx) {
-                Ok(xfer) => {
-                    let (res, dpi2, buf2) = xfer.wait();
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                    if let Err(e) = res {
-                        error!("Bottom‐half DMA transfer error: {:?}", e);
-                    }
-                }
-                Err((e, dpi2, buf2)) => {
-                    error!("Bottom‐half DMA send error: {:?}", e);
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                }
+            Err((e, dpi2, buf2)) => {
+                error!("DMA send error: {:?}", e);
+                dpi    = dpi2;
+                dma_tx = buf2;
             }
         }
     }
