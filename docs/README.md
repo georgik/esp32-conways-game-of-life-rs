@@ -169,7 +169,7 @@ source ~/export-esp.sh
 Build:
 
 ```
-cd esp32-s3-box-3
+cd esp32-s3-lcd-ev-board
 cargo run --release
 ```
 
