@@ -2,54 +2,41 @@
 #![no_main]
 
 extern crate alloc;
-use core::mem;
-use core::slice;
-use esp_hal::clock::CpuClock::_240MHz;
 use alloc::boxed::Box;
-use alloc::string::ToString;
-use core::fmt::Write;
+use bevy_ecs::prelude::*;
 use embedded_graphics::{
     Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
-    text::Text,
 };
 use embedded_graphics_framebuf::FrameBuf;
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
-use embedded_hal::delay::DelayNs;
-use embedded_hal_bus::spi::ExclusiveDevice;
+use esp_hal::clock::CpuClock::_240MHz;
 use esp_hal::delay::Delay;
-use esp_hal::dma::{DmaDescriptor, DmaRxBuf, DmaTxBuf, CHUNK_SIZE};
-use esp_hal::dma_buffers;
+use esp_hal::dma::{CHUNK_SIZE, DmaDescriptor, DmaTxBuf};
 use esp_hal::i2c::{self, master::I2c};
 use esp_hal::lcd_cam::{
     LcdCam,
     lcd::{
-        ClockMode,
-        Phase,
-        Polarity,
+        ClockMode, Phase, Polarity,
         dpi::{Config, Dpi, Format, FrameTiming},
     },
 };
 use esp_hal::{
     Blocking,
-    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
-    dma_loop_buffer,
+    gpio::{Level, Output, OutputConfig},
     main,
     peripherals::Peripherals,
     rng::Rng,
     time::Rate,
 };
-use esp_println::{logger::init_logger_from_env, print, println};
-use log::{info, error};
-use bevy_ecs::prelude::*;
-use mipidsi::interface::ParallelInterface;
+use esp_println::logger::init_logger_from_env;
+use log::{error, info};
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    println!("Panic: {}", _info);
+    error!("Panic: {}", _info);
     loop {}
 }
 
@@ -59,9 +46,8 @@ const LCD_V_RES: u16 = 480;
 const BUFFER_SIZE: usize = LCD_H_RES as usize * LCD_V_RES as usize;
 
 // --- Game of Life Definitions ---
-const GRID_WIDTH: usize = 60;
-const GRID_HEIGHT: usize = 60;
-const RESET_AFTER_GENERATIONS: usize = 500;
+const GRID_WIDTH: usize = 70;
+const GRID_HEIGHT: usize = 70;
 
 // Define the I2C expander struct (based on working code)
 struct Tca9554 {
@@ -218,21 +204,15 @@ const INIT_CMDS: &[InitCmd] = &[
             0x03, 0xd0, 0x03, 0xe0, 0x03, 0xea, 0x03, 0xfa, 0x03, 0xff,
         ],
     ),
-
     InitCmd::Cmd(0x36, &[0x00]),
-
-
-    InitCmd::Cmd(0x2A, &[0x00, 0x00, 0x01, 0xDF]),  // 0 to 479 (0x1DF)
-
+    InitCmd::Cmd(0x2A, &[0x00, 0x00, 0x01, 0xDF]), // 0 to 479 (0x1DF)
     // Set full row address range
-    InitCmd::Cmd(0x2B, &[0x00, 0x00, 0x01, 0xDF]),  // 0 to 479 (0x1DF)
-
+    InitCmd::Cmd(0x2B, &[0x00, 0x00, 0x01, 0xDF]), // 0 to 479 (0x1DF)
     InitCmd::Cmd(0x3A, &[0x66]),
     InitCmd::Cmd(0x11, &[]),
     InitCmd::Delay(120),
     InitCmd::Cmd(0x29, &[]),
     InitCmd::Delay(20),
-
 ];
 
 /// A wrapper around a boxed array that implements FrameBufferBackend.
@@ -274,49 +254,6 @@ impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
     }
 }
 
-// --- Resources for the ECS ---
-#[derive(Resource)]
-struct GameOfLifeResource {
-    grid: [[u8; GRID_WIDTH]; GRID_HEIGHT],
-    generation: usize,
-}
-
-impl Default for GameOfLifeResource {
-    fn default() -> Self {
-        Self {
-            grid: [[0; GRID_WIDTH]; GRID_HEIGHT],
-            generation: 0,
-        }
-    }
-}
-
-#[derive(Resource)]
-struct RngResource(Rng);
-
-// 2 DMA descriptors
-const NUM_DMA_DESCRIPTORS: usize = 2;
-
-
-type MyDisplay = FrameBuf<Rgb565, &'static mut [u16]>;
-type HeapDisplay<const N: usize> = FrameBuf<Rgb565, HeapBuffer<Rgb565, N>>;
-
-// Resources for display access
-struct DisplayResource {
-    display: FrameBuf<Rgb565, HeapBuffer<Rgb565, BUFFER_SIZE>>,
-    dpi: Dpi<'static, Blocking>,
-    dma_buf: DmaTxBuf,
-}
-
-
-// Button resources
-struct ButtonResource {
-    button: Input<'static>,
-}
-
-#[derive(Default, Resource)]
-struct ButtonState {
-    was_pressed: bool,
-}
 
 fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     for row in grid.iter_mut() {
@@ -337,7 +274,9 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
             let mut alive_neighbors = 0;
             for i in 0..3 {
                 for j in 0..3 {
-                    if i == 1 && j == 1 { continue; }
+                    if i == 1 && j == 1 {
+                        continue;
+                    }
                     let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
                     let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
                     if grid[ny][nx] > 0 {
@@ -380,44 +319,6 @@ fn age_to_color(age: u8) -> Rgb565 {
     }
 }
 
-fn rgb565_to_u16(color: Rgb565) -> u16 {
-    // Just convert the color directly to its storage format
-    color.into_storage()
-}
-
-// --- ECS Systems ---
-fn update_game_of_life_system(
-    mut game: ResMut<GameOfLifeResource>,
-    mut rng_res: ResMut<RngResource>,
-) {
-    update_game_of_life(&mut game.grid);
-    game.generation += 1;
-    if game.generation >= RESET_AFTER_GENERATIONS {
-        randomize_grid(&mut rng_res.0, &mut game.grid);
-        game.generation = 0;
-    }
-}
-
-/// System to check the button and reset the simulation when pressed.
-fn button_reset_system(
-    mut game: ResMut<GameOfLifeResource>,
-    mut rng_res: ResMut<RngResource>,
-    mut btn_state: ResMut<ButtonState>,
-    button_res: NonSend<ButtonResource>,
-) {
-    // Check if the button is pressed (active low)
-    if button_res.button.is_low() {
-        if !btn_state.was_pressed {
-            // Button press detected: reset simulation.
-            randomize_grid(&mut rng_res.0, &mut game.grid);
-            game.generation = 0;
-            btn_state.was_pressed = true;
-        }
-    } else {
-        btn_state.was_pressed = false;
-    }
-}
-
 /// Draws the game grid using the cell age for color.
 fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
@@ -447,18 +348,7 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
     Ok(())
 }
 
-const LCD_BUFFER_SIZE: usize = 480*480;
-
-type FbBuffer = HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
-
-type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
-
-#[derive(Resource)]
-struct FrameBufferResource {
-    frame_buf: MyFrameBuf,
-}
-
-// use esp_hal::dma::{DmaDescriptor, DmaTxBuf};
+const LCD_BUFFER_SIZE: usize = 480 * 480;
 
 // Size of the entire frame in bytes (2 bytes per pixel)
 const FRAME_BYTES: usize = BUFFER_SIZE * 2;
@@ -467,28 +357,12 @@ const NUM_DMA_DESC: usize = (FRAME_BYTES + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
 /// Place the descriptor(s) in DMA-capable RAM.
 #[unsafe(link_section = ".dma")]
-static mut TX_DESCRIPTORS: [DmaDescriptor; NUM_DMA_DESC] =
-    [DmaDescriptor::EMPTY; NUM_DMA_DESC];
-
-fn write_generation<D: DrawTarget<Color = Rgb565>>(
-    display: &mut D,
-    generation: usize,
-) -> Result<(), D::Error> {
-    let mut num_str = heapless::String::<20>::new();
-    write!(num_str, "{}", generation).unwrap();
-    Text::new(
-        num_str.as_str(),
-        Point::new(8, 13),
-        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-    )
-        .draw(display)?;
-    Ok(())
-}
+static mut TX_DESCRIPTORS: [DmaDescriptor; NUM_DMA_DESC] = [DmaDescriptor::EMPTY; NUM_DMA_DESC];
 
 #[main]
 fn main() -> ! {
-    let peripherals: Peripherals = esp_hal::init(esp_hal::Config::default()
-        .with_cpu_clock(_240MHz));
+    let peripherals: Peripherals =
+        esp_hal::init(esp_hal::Config::default().with_cpu_clock(_240MHz));
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
     init_logger_from_env();
 
@@ -497,9 +371,9 @@ fn main() -> ! {
         peripherals.I2C0,
         i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
     )
-        .unwrap()
-        .with_sda(peripherals.GPIO47)
-        .with_scl(peripherals.GPIO48);
+    .unwrap()
+    .with_sda(peripherals.GPIO47)
+    .with_scl(peripherals.GPIO48);
 
     // Initialize the IO expander for controlling the display
     let mut expander = Tca9554::new(i2c);
@@ -507,7 +381,7 @@ fn main() -> ! {
     expander.write_direction_reg(0b1111_0001).unwrap();
 
     let delay = Delay::new();
-    println!("Initializing display...");
+    info!("Initializing display...");
 
     // Set up the write_byte function for sending commands to the display
     let mut write_byte = |b: u8, is_cmd: bool| {
@@ -518,9 +392,7 @@ fn main() -> ! {
         let mut output = 0b1111_0001 & !SCS_BIT;
         expander.write_output_reg(output).unwrap();
 
-        for bit in core::iter::once(!is_cmd)
-            .chain((0..8).map(|i| (b >> i) & 0b1 != 0).rev())
-        {
+        for bit in core::iter::once(!is_cmd).chain((0..8).map(|i| (b >> i) & 0b1 != 0).rev()) {
             let prev = output;
             if bit {
                 output |= SDA_BIT;
@@ -573,18 +445,6 @@ fn main() -> ! {
     let tx_channel = peripherals.DMA_CH2;
     let lcd_cam = LcdCam::new(peripherals.LCD_CAM);
 
-    // Create a DMA buffer for sending data to the display
-    const LINES_PER_CHUNK: usize = 4;
-    // each pixel is 2 bytes, so:
-    const CHUNK_BYTES: usize = LCD_H_RES as usize * LINES_PER_CHUNK * 2;
-    // let ( _rx, _rx_desc, tx_buf, tx_desc ) = dma_buffers!(CHUNK_BYTES);
-    // let mut dma_tx = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
-
-    // let dma_tx_buf1 = DmaTxBuf::new(tx_descriptors1, tx_buffer1).unwrap();
-    // let dma_buf_len = dma_tx_buf1.len();
-    // println!("DMA buffer size: {} bytes", dma_buf_len);
-
-
     // Configure the RGB display
     let config = Config::default()
         .with_clock_mode(ClockMode {
@@ -601,10 +461,10 @@ fn main() -> ! {
             horizontal_active_width: 480,
             vertical_active_height: 480,
             // extend total timings for larger porch intervals
-            horizontal_total_width: 600,          // allow long back/front porch
-            horizontal_blank_front_porch: 80,    // plenty of front porch
-            vertical_total_height: 600,          // allow longer vertical blank
-            vertical_blank_front_porch: 80,      // plenty of vertical blank porch
+            horizontal_total_width: 600, // allow long back/front porch
+            horizontal_blank_front_porch: 80, // plenty of front porch
+            vertical_total_height: 600,  // allow longer vertical blank
+            vertical_blank_front_porch: 80, // plenty of vertical blank porch
             // maintain sync widths
             hsync_width: 10,
             vsync_width: 4,
@@ -643,11 +503,10 @@ fn main() -> ! {
         .with_data14(peripherals.GPIO2)
         .with_data15(peripherals.GPIO1);
 
-    println!("Display initialized, starting game logic");
+    info!("Display initialized, starting game logic");
 
     // Initialize Game of Life
     let mut game_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
-    let mut generation = 0;
     let mut rng = Rng::new(peripherals.RNG);
 
     // Initialize with random state
@@ -661,16 +520,9 @@ fn main() -> ! {
     // Draw initial screen (blue for testing)
     frame_buf.clear(Rgb565::BLUE).unwrap();
 
-    // Helper function to convert Rgb565 to raw u16 format for the display
-    fn rgb565_to_u16(color: Rgb565) -> u16 {
-        color.into_storage()
-    }
-
     // Initial transfer
-    // let mut transfer = dpi.send(false, dma_buf).map_err(|e| e.0).unwrap();
-    let mut loop_delay = Delay::new();
 
-    println!("Starting main loop");
+    info!("Starting main loop");
 
     const FRAME_BYTES: usize = BUFFER_SIZE * 2;
     let buf_box: Box<[u8; FRAME_BYTES]> = Box::new([0; FRAME_BYTES]);
@@ -678,9 +530,8 @@ fn main() -> ! {
     let psram_buf: &'static mut [u8] = Box::leak(buf_box);
 
     // Tie to descriptor set for one-shot DMA
-    let mut dma_tx: DmaTxBuf = unsafe {
-        DmaTxBuf::new(&mut TX_DESCRIPTORS[..], psram_buf).unwrap()
-    };
+    let mut dma_tx: DmaTxBuf =
+        unsafe { DmaTxBuf::new(&mut TX_DESCRIPTORS[..], psram_buf).unwrap() };
 
     // Main loop to draw the entire image
     loop {
@@ -691,21 +542,23 @@ fn main() -> ! {
         let dst = dma_tx.as_mut_slice();
         for (i, px) in frame_buf.data.iter().enumerate() {
             let [lo, hi] = px.into_storage().to_le_bytes();
-            dst[2*i    ] = lo;
-            dst[2*i + 1] = hi;
+            dst[2 * i] = lo;
+            dst[2 * i + 1] = hi;
         }
 
         // One-shot transfer
         match dpi.send(false, dma_tx) {
             Ok(xfer) => {
                 let (res, dpi2, buf2) = xfer.wait();
-                dpi    = dpi2;
+                dpi = dpi2;
                 dma_tx = buf2;
-                if let Err(e) = res { error!("DMA error: {:?}", e); }
+                if let Err(e) = res {
+                    error!("DMA error: {:?}", e);
+                }
             }
             Err((e, dpi2, buf2)) => {
                 error!("DMA send error: {:?}", e);
-                dpi    = dpi2;
+                dpi = dpi2;
                 dma_tx = buf2;
             }
         }

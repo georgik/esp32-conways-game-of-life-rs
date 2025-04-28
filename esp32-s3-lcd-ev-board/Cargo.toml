@@ -8,7 +8,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 #esp-hal = { version = "1.0.0-beta.0", features = ["esp32s3", "unstable"] }
-esp-hal = { path = "../../esp-hal/esp-hal", features = ["esp32s3", "unstable"] }
+esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", rev = "611bdc6", features = ["esp32s3", "unstable"] }
 esp-backtrace = { version = "0.15.1", features = [
     "panic-handler",
     "println"
