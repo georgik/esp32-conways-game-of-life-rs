@@ -45,6 +45,7 @@ use esp_hal::{
 use esp_println::{logger::init_logger_from_env, print, println};
 use log::{info, error};
 use bevy_ecs::prelude::*;
+use esp_hal::xtensa_lx_rt::interrupt;
 use mipidsi::interface::ParallelInterface;
 
 #[panic_handler]
@@ -473,6 +474,55 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
     Ok(())
 }
 
+use core::{ptr, sync::atomic::{AtomicUsize, Ordering}};
+use esp_hal::{handler, ram};
+use esp_hal::peripherals::{DMA, LCD_CAM};
+
+// Shared state—set these up in your `main()` before starting DMA:
+static FRAME_PTR:    AtomicUsize = AtomicUsize::new(0);
+static DMA_BUF_PTR:  AtomicUsize = AtomicUsize::new(0);
+static CHUNK_PIXELS: AtomicUsize = AtomicUsize::new(0);
+static NEXT_CHUNK:   AtomicUsize = AtomicUsize::new(0);
+static TOTAL_CHUNKS: AtomicUsize = AtomicUsize::new(0);
+
+#[handler]
+#[ram]
+fn LCD_CAM() {
+    // 1) clear the “end-of-frame” (VSYNC_END) interrupt
+    let lcd = unsafe { &*LCD_CAM::ptr() };
+    lcd.lc_dma_int_clr().write(|w| {
+        // clear the VSYNC bit (bit 0)
+        w.lcd_vsync_int_clr().set_bit();
+        // if you ever also need to clear “transfer done”, you can do:
+        // w.lcd_trans_done_int_clr().set_bit();
+        w
+    });
+
+    // 2) pick the next slice
+    let frame_ptr = FRAME_PTR.load(Ordering::SeqCst) as *const u16;
+    let dma_ptr   = DMA_BUF_PTR.load(  Ordering::SeqCst) as *mut   u16;
+    let chunk_len = CHUNK_PIXELS.load(Ordering::SeqCst);
+    let mut idx   = NEXT_CHUNK.load(Ordering::SeqCst);
+    let total     = TOTAL_CHUNKS.load(Ordering::SeqCst);
+    if idx >= total { idx = 0; }
+
+    // 3) copy chunk_len pixels from framebuffer to DMA buffer
+    unsafe {
+        let src = frame_ptr.add(idx * chunk_len);
+        ptr::copy_nonoverlapping(src, dma_ptr, chunk_len);
+    }
+
+    // 4) restart DMA on channel 2 via the OUT_LINK register
+    let dma_regs = unsafe { &*DMA::ptr() };
+    let ch2 = dma_regs.ch(2);
+    // trigger a restart (bit 22) and start (bit 21):
+    ch2.out_link().write(|w| w.outlink_restart().set_bit());
+    ch2.out_link().write(|w| w.outlink_start  ().set_bit());
+
+    // 5) bump to the next chunk
+    NEXT_CHUNK.store(idx + 1, Ordering::SeqCst);
+}
+
 #[main]
 fn main() -> ! {
     let peripherals: Peripherals = esp_hal::init(esp_hal::Config::default()
@@ -586,21 +636,23 @@ fn main() -> ! {
         })
         .with_timing(FrameTiming {
             horizontal_active_width: 480,
-            horizontal_total_width: 550,
+            // HSYNC + front porch = 40, back porch = 40 → total = 560
             horizontal_blank_front_porch: 40,
-
+            horizontal_total_width:      560,
             vertical_active_height: 480,
-            vertical_total_height: 550,
-            vertical_blank_front_porch: 40,
-
-            hsync_width: 9,
-            vsync_width: 9,
-
-            hsync_position: 9,
+            // VSYNC + front porch = 16, back porch = 16 → total = 512
+            vertical_blank_front_porch: 16,
+            vertical_total_height:      512,
+            hsync_width: 12,
+            vsync_width: 4,
+            hsync_position: 0,
         })
+
         .with_vsync_idle_level(Level::High)
         .with_hsync_idle_level(Level::High)
         .with_de_idle_level(Level::Low)
+        // .with_hs_blank_en(false)
+
         .with_disable_black_region(false);
 
     // Initialize the DPI interface with all the pins
@@ -659,75 +711,44 @@ fn main() -> ! {
 
     println!("Starting main loop");
 
+    // how many lines per half-frame?
     const HALF_LINES: usize = (LCD_V_RES as usize) / 2;
+    // how many bytes per half-frame? (2 bytes per pixel)
     const HALF_BYTES: usize = HALF_LINES * (LCD_H_RES as usize) * 2;
+    // const LINES_PER_CHUNK: usize = 4;
+    // We'll divide the 480 lines into 120 chunks of 4.
+    let total_chunks = (LCD_V_RES as usize + LINES_PER_CHUNK - 1) / LINES_PER_CHUNK;
+    let pixels_per_chunk = LINES_PER_CHUNK * LCD_H_RES as usize;
 
-    // allocate one PSRAM-backed “half-frame” DMA buffer
-    let ( _rx, _rx_desc, tx_buf_half, tx_desc_half ) = dma_buffers!(HALF_BYTES);
-    let mut dma_tx = DmaTxBuf::new(tx_desc_half, tx_buf_half).unwrap();
+    // Load up the atomics so the ISR knows where to grab data from:
+    // ————— STATIC DMA RING FOR ONE HALF-FRAME —————
+    // this allocates one Rx (unused), one Rx descriptor (unused),
+    // plus our transmit buffer + descriptor, each exactly HALF_BYTES long
+    let (_rx, _rx_desc, tx_buf, tx_desc) = dma_buffers!(HALF_BYTES);
+    let mut dma = DmaTxBuf::new(tx_desc, tx_buf).unwrap();
+    FRAME_PTR.store(frame_buf.data.as_ptr()     as usize, Ordering::SeqCst);
+    DMA_BUF_PTR.store(dma.as_mut_slice().as_ptr() as usize, Ordering::SeqCst);
+    CHUNK_PIXELS.store(pixels_per_chunk,         Ordering::SeqCst);
+    TOTAL_CHUNKS.store(total_chunks,             Ordering::SeqCst);
+    NEXT_CHUNK.store(0,                           Ordering::SeqCst);
 
-    // Main loop to draw the entire image
+    let _ = dpi.send(false, dma);
+
     loop {
-        // 1) Update & draw Game of Life
+        // update the model
         update_game_of_life(&mut game_grid);
+        // redraw into your FrameBuf
         draw_grid(&mut frame_buf, &game_grid).unwrap();
+        write_generation(&mut frame_buf, generation).unwrap();
 
-        // --- Top‐half chunk (lines 0…239) ---
-        {
-            // Copy pixels into DMA buffer
-            let src = &frame_buf.data[0 .. HALF_LINES * LCD_H_RES as usize];
-            let dst = dma_tx.as_mut_slice();
-            for (i, px) in src.iter().enumerate() {
-                let bytes = px.into_storage().to_le_bytes();
-                dst[2*i    ] = bytes[0];
-                dst[2*i + 1] = bytes[1];
-            }
-
-            // Send & wait, handling errors
-            match dpi.send(false, dma_tx) {
-                Ok(xfer) => {
-                    let (res, dpi2, buf2) = xfer.wait();
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                    if let Err(e) = res {
-                        error!("Top‐half DMA transfer error: {:?}", e);
-                    }
-                }
-                Err((e, dpi2, buf2)) => {
-                    error!("Top‐half DMA send error: {:?}", e);
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                }
-            }
+        generation = generation.wrapping_add(1);
+        if generation >= RESET_AFTER_GENERATIONS {
+            randomize_grid(&mut rng, &mut game_grid);
+            generation = 0;
         }
 
-        // --- Bottom‐half chunk (lines 240…479) ---
-        {
-            // Copy pixels into DMA buffer
-            let src = &frame_buf.data[HALF_LINES * LCD_H_RES as usize ..];
-            let dst = dma_tx.as_mut_slice();
-            for (i, px) in src.iter().enumerate() {
-                let bytes = px.into_storage().to_le_bytes();
-                dst[2*i    ] = bytes[0];
-                dst[2*i + 1] = bytes[1];
-            }
-
-            // Send & wait, handling errors
-            match dpi.send(false, dma_tx) {
-                Ok(xfer) => {
-                    let (res, dpi2, buf2) = xfer.wait();
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                    if let Err(e) = res {
-                        error!("Bottom‐half DMA transfer error: {:?}", e);
-                    }
-                }
-                Err((e, dpi2, buf2)) => {
-                    error!("Bottom‐half DMA send error: {:?}", e);
-                    dpi    = dpi2;
-                    dma_tx = buf2;
-                }
-            }
-        }
+        // throttle if you like
+        loop_delay.delay_ms(50u32);
     }
+
 }
