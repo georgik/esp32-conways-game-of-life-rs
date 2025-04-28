@@ -462,9 +462,9 @@ fn main() -> ! {
             vertical_active_height: 480,
             // extend total timings for larger porch intervals
             horizontal_total_width: 600, // allow long back/front porch
-            horizontal_blank_front_porch: 80, // plenty of front porch
+            horizontal_blank_front_porch: 80,
             vertical_total_height: 600,  // allow longer vertical blank
-            vertical_blank_front_porch: 80, // plenty of vertical blank porch
+            vertical_blank_front_porch: 80,
             // maintain sync widths
             hsync_width: 10,
             vsync_width: 4,
