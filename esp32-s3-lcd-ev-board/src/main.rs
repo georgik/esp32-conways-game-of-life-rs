@@ -665,8 +665,6 @@ fn main() -> ! {
     // allocate one PSRAM-backed “half-frame” DMA buffer
     let ( _rx, _rx_desc, tx_buf_half, tx_desc_half ) = dma_buffers!(HALF_BYTES);
     let mut dma_tx = DmaTxBuf::new(tx_desc_half, tx_buf_half).unwrap();
-    // let mut dma_tx_buf = dma_tx_buf1;
-    let mut write_byte = write_byte;
 
     // Main loop to draw the entire image
     loop {
@@ -684,23 +682,6 @@ fn main() -> ! {
                 dst[2*i    ] = bytes[0];
                 dst[2*i + 1] = bytes[1];
             }
-
-            // Column window: X=0…479
-            write_byte(0x2A, true);
-            write_byte(0, false);
-            write_byte(0, false);
-            write_byte(((LCD_H_RES - 1) >> 8)  as u8, false);
-            write_byte(((LCD_H_RES - 1) & 0xFF) as u8, false);
-
-            // Row window: Y=0…239
-            write_byte(0x2B, true);
-            write_byte(0, false);
-            write_byte(0, false);
-            write_byte(((HALF_LINES - 1) >> 8)  as u8, false);
-            write_byte(((HALF_LINES - 1) & 0xFF) as u8, false);
-
-            // RAM‐write
-            write_byte(0x2C, true);
 
             // Send & wait, handling errors
             match dpi.send(false, dma_tx) {
@@ -730,23 +711,6 @@ fn main() -> ! {
                 dst[2*i    ] = bytes[0];
                 dst[2*i + 1] = bytes[1];
             }
-
-            // Column window: X=0…479
-            write_byte(0x2A, true);
-            write_byte(0, false);
-            write_byte(0, false);
-            write_byte(((LCD_H_RES - 1) >> 8)  as u8, false);
-            write_byte(((LCD_H_RES - 1) & 0xFF) as u8, false);
-
-            // Row window: Y=240…479
-            write_byte(0x2B, true);
-            write_byte((HALF_LINES >> 8)  as u8, false); // Y start = 240
-            write_byte((HALF_LINES & 0xFF) as u8, false);
-            write_byte(((LCD_V_RES - 1) >> 8)  as u8, false); // Y end = 479
-            write_byte(((LCD_V_RES - 1) & 0xFF) as u8, false);
-
-            // RAM‐write
-            write_byte(0x2C, true);
 
             // Send & wait, handling errors
             match dpi.send(false, dma_tx) {
