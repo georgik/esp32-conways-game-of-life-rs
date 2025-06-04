@@ -284,7 +284,7 @@ fn render_system(
 
     // --- Overlay centered text ---
     let line1 = "Rust no_std ESP32-S3";
-    let line2 = "Bevy ECS 0.15 no_std";
+    let line2 = "Bevy ECS 0.16 no_std";
     // Estimate text width: assume ~8 pixels per character.
     let line1_width = line1.len() as i32 * 8;
     let line2_width = line2.len() as i32 * 8;
