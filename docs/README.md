@@ -199,10 +199,15 @@ one core is dedicated to the display.
 
 The display configuration is stored in EEPROM for this specific display type.
 
+Run:
 ```
 esope-sld-c-w-s3
 cargo r -r
 ```
+
+The board requires connection using ESP-Prog. You need to switch the board into boot mode.
+Press and hold the BOOT button, then press the RESET button, then release the BOOT button.
+Press the RESET button again to start the program.
 
 ### WASM
 
