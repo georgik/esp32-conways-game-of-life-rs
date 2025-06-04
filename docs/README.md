@@ -185,6 +185,16 @@ cd esp32-c3-lcdkit
 cargo run --release
 ```
 
+### ESoPe SLD\_C\_W\_S3
+
+Board: [SDL\C\_W\_S3](https://esope.de/en/products)
+Display: RGB [Schukat Smartwin display-concept](https://shop.schukat.com/de/de/EUR/c/ESOP)
+
+```
+esope-sld-c-w-s3
+cargo r -r
+```
+
 ### WASM
 
 This is experimental implementation for WASM.
