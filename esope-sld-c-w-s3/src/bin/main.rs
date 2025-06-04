@@ -1,49 +1,47 @@
 #![no_std]
 #![no_main]
 
-use esp_hal::peripherals::*;
 use esp_hal::dma::ExternalBurstConfig;
 
-use esp_hal::gpio::Level;
-use esp_hal::delay::Delay;
-use esp_println::logger::init_logger_from_env;
-use esp_hal::time::Rate;
-use esp_hal::lcd_cam::{
-    LcdCam,
-    lcd::{
-        ClockMode, Phase, Polarity,
-        dpi::{Config as DpiConfig, Dpi, Format, FrameTiming},
-    },
-};
-use esp_hal::gpio::{Output, OutputConfig};
 use alloc::boxed::Box;
-use alloc::vec::Vec;
 use embedded_graphics::{
-    Drawable,
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
+    Drawable,
 };
-use embedded_graphics_framebuf::FrameBuf;
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
+use embedded_graphics_framebuf::FrameBuf;
+use esp_hal::gpio::Level;
+use esp_hal::gpio::{Output, OutputConfig};
+use esp_hal::lcd_cam::{
+    lcd::{
+        dpi::{Config as DpiConfig, Dpi, Format, FrameTiming},
+        ClockMode, Phase, Polarity,
+    },
+    LcdCam,
+};
+use esp_hal::time::Rate;
+use esp_println::logger::init_logger_from_env;
 
-use esp_hal::clock::CpuClock;
-use core::ptr::addr_of_mut;
+use eeprom24x::{Eeprom24x, SlaveAddr};
 use embassy_executor::Spawner;
-use esp_hal_embassy::Executor;
-use static_cell::StaticCell;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Ticker;
-use esp_hal::timer::{AnyTimer, timg::TimerGroup};
+use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::I2c;
-use eeprom24x::{Eeprom24x, SlaveAddr};
+use esp_hal::timer::{timg::TimerGroup, AnyTimer};
+use esp_hal_embassy::Executor;
 use log::{error, info};
+use static_cell::StaticCell;
 
 // DMA line‐buffer for parallel RGB (1 descriptor, up to 4095 bytes each)
 use esp_hal::dma::{DmaDescriptor, DmaTxBuf, CHUNK_SIZE};
 use esp_println::println;
 
+use esp_hal::rng::Rng;
+use esp_hal::system::{CpuControl, Stack};
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -143,16 +141,12 @@ fn update_game_of_life(
             let cell = current[y][x];
             next[y][x] = match (cell > 0, neighbors) {
                 (true, 2) | (true, 3) => cell.saturating_add(1), // stay alive, age
-                (false, 3) => 1, // born
-                _ => 0, // dead
+                (false, 3) => 1,                                 // born
+                _ => 0,                                          // dead
             };
         }
     }
 }
-
-
-use esp_hal::rng::Rng;
-use esp_hal::system::{Cpu, CpuControl, Stack};
 
 fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     for y in 0..GRID_HEIGHT {
@@ -212,7 +206,7 @@ static mut PSRAM_BUF_PTR: *mut u8 = core::ptr::null_mut();
 static mut PSRAM_BUF_LEN: usize = 0;
 
 #[esp_hal_embassy::main]
-async fn main(spawner: Spawner) -> ! {
+async fn main(_spawner: Spawner) -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
     // Initialize TimerGroup and timer1 for app core Embassy time driver
@@ -226,10 +220,7 @@ async fn main(spawner: Spawner) -> ! {
     // esp_alloc::heap_allocator!(size: 72 * 1024);
 
     // Read display dimensions from EEPROM
-    let mut i2c_bus = I2c::new(
-        peripherals.I2C0,
-        esp_hal::i2c::master::Config::default()
-    )
+    let i2c_bus = I2c::new(peripherals.I2C0, esp_hal::i2c::master::Config::default())
         .unwrap()
         .with_sda(peripherals.GPIO1)
         .with_scl(peripherals.GPIO41);
@@ -238,7 +229,10 @@ async fn main(spawner: Spawner) -> ! {
     eeprom.read_data(0x00, &mut eeid).unwrap();
     let display_width = u16::from_be_bytes([eeid[8], eeid[9]]) as usize;
     let display_height = u16::from_be_bytes([eeid[10], eeid[11]]) as usize;
-    info!("Display size from EEPROM: {}x{}", display_width, display_height);
+    info!(
+        "Display size from EEPROM: {}x{}",
+        display_width, display_height
+    );
 
     // Full-screen DMA constants
     const MAX_FRAME_BYTES: usize = 320 * 240 * 2;
@@ -252,18 +246,17 @@ async fn main(spawner: Spawner) -> ! {
     const FRAME_BYTES: usize = LCD_BUFFER_SIZE * 2;
     let mut fb_box: Box<[Rgb565; LCD_BUFFER_SIZE]> = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
     let fb_ptr: *mut Rgb565 = fb_box.as_mut_ptr();
-    let psram_buf: &'static mut [u8] = unsafe {
-        core::slice::from_raw_parts_mut(
-            fb_ptr as *mut u8,
-            FRAME_BYTES
-        )
-    };
+    let psram_buf: &'static mut [u8] =
+        unsafe { core::slice::from_raw_parts_mut(fb_ptr as *mut u8, FRAME_BYTES) };
     // Verify PSRAM buffer allocation and alignment
     let buf_ptr = psram_buf.as_ptr() as usize;
     info!("PSRAM buffer allocated at address: 0x{:08X}", buf_ptr);
     info!("PSRAM buffer length: {}", psram_buf.len());
     info!("PSRAM buffer alignment modulo 32: {}", buf_ptr % 32);
-    assert!(buf_ptr % 64 == 0, "PSRAM buffer must be 64-byte aligned for DMA");
+    assert!(
+        buf_ptr % 64 == 0,
+        "PSRAM buffer must be 64-byte aligned for DMA"
+    );
     // Publish PSRAM buffer pointer and len for app core
     unsafe {
         PSRAM_BUF_PTR = psram_buf.as_mut_ptr();
@@ -282,31 +275,26 @@ async fn main(spawner: Spawner) -> ! {
     backlight.set_high();
 
     // Touch reset line
-    let mut touch_reset = Output::new(peripherals.GPIO2, Level::High, OutputConfig::default());
-    // Optionally pulse low-high here if required by the module.
-
+    let mut _touch_reset = Output::new(peripherals.GPIO2, Level::High, OutputConfig::default());
 
     // Initialize the parallel‐RGB display via DPI
-    // let mut display = init_display(peripherals);
-    // --- Initialize parallel‐RGB display via DPI inline ---
-    // let mut delay = Delay::new(&peripherals.TIMG1);
     let lcd_cam = LcdCam::new(peripherals.LCD_CAM);
 
     let pclk_hz = ((eeid[12] as u32) * 1_000_000 + (eeid[13] as u32) * 100_000).min(13_600_000);
     let h_res = display_width;
     let v_res = display_height;
     let hsync_pulse = eeid[17] as u32;
-    let hsync_back  = u16::from_be_bytes([eeid[15], eeid[16]]) as u32;
+    let hsync_back = u16::from_be_bytes([eeid[15], eeid[16]]) as u32;
     let hsync_front = u16::from_be_bytes([eeid[18], eeid[19]]) as u32;
     let vsync_pulse = eeid[22] as usize;
-    let vsync_back  = u16::from_be_bytes([eeid[20], eeid[21]]);
+    let vsync_back = u16::from_be_bytes([eeid[20], eeid[21]]);
     let vsync_front = u16::from_be_bytes([eeid[23], eeid[24]]) as u32;
 
     // Read idle/polarity flags from EEPROM (eeid[25])
     let flags = eeid[25];
-    let hsync_idle_low  = (flags & 0x01) != 0;
-    let vsync_idle_low  = (flags & 0x02) != 0;
-    let de_idle_high    = (flags & 0x04) != 0;
+    let hsync_idle_low = (flags & 0x01) != 0;
+    let vsync_idle_low = (flags & 0x02) != 0;
+    let de_idle_high = (flags & 0x04) != 0;
     let pclk_active_neg = (flags & 0x20) != 0;
 
     // Log all infomration about display configuration
@@ -320,70 +308,56 @@ async fn main(spawner: Spawner) -> ! {
     info!("  VSYNC back porch: {} lines", vsync_back);
     info!("  VSYNC front porch: {} lines", vsync_front);
 
-
-    let hsync_w = hsync_pulse as usize;
-    let hsync_back_porch = hsync_back as usize;
-    let hsync_front_porch = hsync_front as usize;
-    let horizontal_total = h_res + hsync_w + hsync_back_porch + hsync_front_porch;
-
-    let vsync_w = vsync_pulse as usize;
-    let vsync_back_porch = vsync_back as usize;
-    let vsync_front_porch = vsync_front as usize;
-    let vertical_total = v_res + vsync_w + vsync_back_porch + vsync_front_porch;
-
-    // Check timing configuration and set minimal values, with warning if the value was too low
-    if hsync_pulse < 4 {
-        error!("HSYNC pulse width is too low: {} pixels, setting to minimum 4 pixels", hsync_pulse);
-    }
-
-    if hsync_back_porch < 43 {
-        error!("HSYNC back porch is too low: {} pixels, setting to minimum 43 pixels", hsync_back);
-    }
-
-    if hsync_front_porch < 8 {
-        error!("HSYNC front porch is too low: {} pixels, setting to minimum 8 pixels", hsync_front);
-    }
-
-    if vsync_pulse < 4 {
-        error!("VSYNC pulse width is too low: {} lines, setting to minimum 4 lines", vsync_pulse);
-    }
-
-    if vsync_back_porch < 12 {
-        error!("VSYNC back porch is too low: {} lines, setting to minimum 12 lines", vsync_back);
-    }
-
-    if vsync_front_porch < 8 {
-        error!("VSYNC front porch is too low: {} lines, setting to minimum 8 lines", vsync_front);
-    }
-
     let dpi_config = DpiConfig::default()
         .with_clock_mode(ClockMode {
-            polarity: if pclk_active_neg { Polarity::IdleHigh } else { Polarity::IdleLow },
-            phase:    if pclk_active_neg { Phase::ShiftHigh } else { Phase::ShiftLow },
+            polarity: if pclk_active_neg {
+                Polarity::IdleHigh
+            } else {
+                Polarity::IdleLow
+            },
+            phase: if pclk_active_neg {
+                Phase::ShiftHigh
+            } else {
+                Phase::ShiftLow
+            },
         })
         .with_frequency(Rate::from_hz(pclk_hz))
         .with_format(Format {
             enable_2byte_mode: true,
             ..Default::default()
         })
+        // The values read from EEPROM seems to differ from a working configuration
         .with_timing(FrameTiming {
-            horizontal_active_width:      320,
-            horizontal_total_width:       320 + 4 + 43 + 79 + 8,  // =446
-            horizontal_blank_front_porch: 79 + 8,    // was 47, add 32px
-            vertical_active_height:       240,
-            vertical_total_height:        240 + 4 + 12 + 16,  // increased blank front porch to 16
-            vertical_blank_front_porch:    16,
-            hsync_width:                  4,
-            vsync_width:                  4,
-            hsync_position:               43 + 4, // (= back_porch + pulse = 47)
+            horizontal_active_width: 320,
+            horizontal_total_width: 320 + 4 + 43 + 79 + 8, // =446
+            horizontal_blank_front_porch: 79 + 8,          // was 47, add 32px
+            vertical_active_height: 240,
+            vertical_total_height: 240 + 4 + 12 + 16, // increased blank front porch to 16
+            vertical_blank_front_porch: 16,
+            hsync_width: 4,
+            vsync_width: 4,
+            hsync_position: 43 + 4, // (= back_porch + pulse = 47)
         })
         // apply idle levels based on EEPROM flags
-        .with_vsync_idle_level(if vsync_idle_low { Level::Low } else { Level::High })
-        .with_hsync_idle_level(if hsync_idle_low { Level::Low } else { Level::High })
-        .with_de_idle_level(if de_idle_high { Level::High } else { Level::Low })
+        .with_vsync_idle_level(if vsync_idle_low {
+            Level::Low
+        } else {
+            Level::High
+        })
+        .with_hsync_idle_level(if hsync_idle_low {
+            Level::Low
+        } else {
+            Level::High
+        })
+        .with_de_idle_level(if de_idle_high {
+            Level::High
+        } else {
+            Level::Low
+        })
         .with_disable_black_region(false);
 
-    let mut dpi = Dpi::new(lcd_cam.lcd, peripherals.DMA_CH2, dpi_config).unwrap()
+    let mut dpi = Dpi::new(lcd_cam.lcd, peripherals.DMA_CH2, dpi_config)
+        .unwrap()
         .with_vsync(peripherals.GPIO6)
         .with_hsync(peripherals.GPIO15)
         .with_de(peripherals.GPIO5)
@@ -424,52 +398,44 @@ async fn main(spawner: Spawner) -> ! {
 
     // Set up grid and randomize, but pass to app core for updating
     let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
-    let mut next_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
     let mut rng = Rng::new(peripherals.RNG);
     randomize_grid(&mut rng, &mut *game_grid);
 
     // The PSRAM framebuffer is now used for drawing in the Conway task.
-
     info!("Entering main loop...");
 
     // Configure a single DMA buffer over the whole PSRAM region with 64‑byte bursts
     let mut dma_tx: DmaTxBuf = unsafe {
-        DmaTxBuf::new_with_config(
-            &mut TX_DESCRIPTORS,
-            psram_buf,
-            ExternalBurstConfig::Size64,
-        ).unwrap()
+        DmaTxBuf::new_with_config(&mut TX_DESCRIPTORS, psram_buf, ExternalBurstConfig::Size64)
+            .unwrap()
     };
 
     // Signal to app core that PSRAM is ready
     PSRAM_READY.signal(());
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let timer0: AnyTimer = timg0.timer0.into();
-    
+
     // Spawn Conway update task on app core (core 1)
     let mut cpu_control = CpuControl::new(peripherals.CPU_CTRL);
-    let _app_core = cpu_control.start_app_core(
-        unsafe { &mut APP_CORE_STACK },
-        move || {
-            // Initialize Embassy time driver on app core
-            esp_hal_embassy::init([timer0, timer1]);
-            // SAFETY: PSRAM_BUF_PTR and PSRAM_BUF_LEN are published before
-            let psram_ptr = unsafe { PSRAM_BUF_PTR };
-            let psram_len = unsafe { PSRAM_BUF_LEN };
-            // Wait until PSRAM is ready
-            PSRAM_READY.wait();
-            // Initialize and run Embassy executor on app core
-            static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-            let executor = EXECUTOR.init(Executor::new());
-            executor.run(|spawner| {
-                spawner.spawn(conway_task(psram_ptr, psram_len)).ok();
-            });
-        }
-    );
+    let _app_core = cpu_control.start_app_core(unsafe { &mut APP_CORE_STACK }, move || {
+        // Initialize Embassy time driver on app core
+        esp_hal_embassy::init([timer0, timer1]);
+        // SAFETY: PSRAM_BUF_PTR and PSRAM_BUF_LEN are published before
+        let psram_ptr = unsafe { PSRAM_BUF_PTR };
+        let psram_len = unsafe { PSRAM_BUF_LEN };
+        // Wait until PSRAM is ready
+        PSRAM_READY.wait();
+        // Initialize and run Embassy executor on app core
+        static EXECUTOR: StaticCell<Executor> = StaticCell::new();
+        let executor = EXECUTOR.init(Executor::new());
+        executor.run(|spawner| {
+            spawner.spawn(conway_task(psram_ptr, psram_len)).ok();
+        });
+    });
 
     // Core 0: Only send DMA frames in a loop
     loop {
-        println!("Core {}: Pushing DMA data...", Cpu::current() as usize);
+        // println!("Core {}: Pushing DMA data...", Cpu::current() as usize);
         let safe_chunk_size = 320 * 240 * 2;
         let frame_bytes = display_width * display_height * 2;
         let len = safe_chunk_size.min(frame_bytes);
@@ -494,11 +460,10 @@ async fn main(spawner: Spawner) -> ! {
 
 // Conway update task running on core 1
 #[embassy_executor::task]
-async fn conway_task(psram_ptr: *mut u8, psram_len: usize) {
+async fn conway_task(psram_ptr: *mut u8, _psram_len: usize) {
     // Reconstruct the framebuffer and game grid
-    let fb: &mut [Rgb565; LCD_BUFFER_SIZE] = unsafe {
-        &mut *(psram_ptr as *mut [Rgb565; LCD_BUFFER_SIZE])
-    };
+    let fb: &mut [Rgb565; LCD_BUFFER_SIZE] =
+        unsafe { &mut *(psram_ptr as *mut [Rgb565; LCD_BUFFER_SIZE]) };
     let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
     let mut next_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
     // Randomize grid (no hardware RNG on core 1, just use some seed)
@@ -509,11 +474,18 @@ async fn conway_task(psram_ptr: *mut u8, psram_len: usize) {
             game_grid[y][x] = if (seed & 1) == 1 { 1 } else { 0 };
         }
     }
-    let mut frame_buf = FrameBuf::new(PSRAMFrameBuffer::new(fb), LCD_H_RES_USIZE.into(), LCD_V_RES_USIZE.into());
+    let mut frame_buf = FrameBuf::new(
+        PSRAMFrameBuffer::new(fb),
+        LCD_H_RES_USIZE.into(),
+        LCD_V_RES_USIZE.into(),
+    );
     let mut ticker = Ticker::every(embassy_time::Duration::from_millis(100));
     loop {
         // Log message with core number
-        println!("Core {}: Updating Game of Life grid...", Cpu::current() as usize);
+        // println!(
+        //     "Core {}: Updating Game of Life grid...",
+        //     Cpu::current() as usize
+        // );
 
         update_game_of_life(&*game_grid, &mut *next_grid);
         core::mem::swap(&mut game_grid, &mut next_grid);
