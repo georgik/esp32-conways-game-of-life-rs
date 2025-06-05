@@ -1,0 +1,35 @@
+[package]
+name = "esp32-conways-game-of-life-rs"
+version = "0.6.0"
+authors = ["Juraj Michálek <juraj.michalek@espressif.com>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+
+[dependencies]
+esp-hal = { version = "1.0.0-beta.1", features = ["esp32s3", "unstable"] }
+esp-backtrace = { version = "0.16.0", features = [
+    "panic-handler",
+    "println"
+] }
+esp-println = { version = "0.14.0", features = [ "log-04" ] }
+log = { version = "0.4.26" }
+
+esp-alloc = "0.8.0"
+embedded-graphics = "0.8.1"
+embedded-hal = "1.0.0"
+mipidsi = "0.9.0"
+#esp-display-interface-spi-dma = "0.3.0"
+# esp-display-interface-spi-dma = { path = "../esp-display-interface-spi-dma"}
+# esp-bsp = "0.4.1"
+embedded-graphics-framebuf = "0.5.0"
+heapless = "0.8.0"
+embedded-hal-bus = "0.3.0"
+#bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "301f618", default-features = false }
+bevy_ecs = { version = "0.16.1", default-features = false }
+
+[features]
+default = [ "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3", "esp32-s3-box-3" ]
+
+# esp32-s3-box-3 = [ "esp-bsp/esp32-s3-box-3", "esp-hal/psram" ]
+esp32-s3-box-3 = [ "esp-hal/psram" ]
