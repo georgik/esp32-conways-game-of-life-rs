@@ -202,7 +202,7 @@ cargo run --release
 
 ![ESP32 Conways Game of Life in Rust - ESoPe SLD_C_W_S3](esope-sld-c-w-s3.jpg)
 
-Board: [SDL\C\_W\_S3](https://esope.de/en/products)
+Board: [SDL\_C\_W\_S3](https://esope.de/en/products)
 Display: RGB [Schukat Smartwin display-concept](https://shop.schukat.com/de/de/EUR/c/ESOP)
 
 The implementation is based on Embassy Async Rust no\_std with RGB interface.
