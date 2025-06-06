@@ -23,7 +23,7 @@ use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::{
     Blocking,
-    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
+    gpio::{Input, Level, Output, OutputConfig},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
