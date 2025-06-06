@@ -114,8 +114,8 @@ impl<'a> FrameBufferBackend for PSRAMFrameBuffer<'a> {
     }
 }
 
-const GRID_WIDTH: usize = 70;
-const GRID_HEIGHT: usize = 70;
+const GRID_WIDTH: usize = 46;
+const GRID_HEIGHT: usize = 34;
 
 fn update_game_of_life(
     current: &[[u8; GRID_WIDTH]; GRID_HEIGHT],
@@ -148,23 +148,37 @@ fn update_game_of_life(
     }
 }
 
+// fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
+//     for y in 0..GRID_HEIGHT {
+//         for x in 0..GRID_WIDTH {
+//             let val = rng.random();
+//             grid[y][x] = if val & 1 == 1 { 1 } else { 0 };
+//         }
+//     }
+// }
+
 fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
-    for y in 0..GRID_HEIGHT {
-        for x in 0..GRID_WIDTH {
-            let val = rng.random();
-            grid[y][x] = if val & 1 == 1 { 1 } else { 0 };
+    for row in grid.iter_mut() {
+        for cell in row.iter_mut() {
+            let mut buf = [0u8; 1];
+            rng.read(&mut buf);
+            // Randomly set cell to 1 (alive) or 0 (dead)
+            *cell = if buf[0] & 1 != 0 { 1 } else { 0 };
         }
     }
 }
 
 fn age_to_color(age: u8) -> Rgb565 {
-    match age {
-        0 => Rgb565::BLACK,
-        1 => Rgb565::new(31, 63, 31),
-        2..=3 => Rgb565::new(31, 48, 0),
-        4..=7 => Rgb565::new(0, 63, 0),
-        8..=15 => Rgb565::new(0, 0, 31),
-        _ => Rgb565::new(31, 0, 0),
+    if age == 0 {
+        Rgb565::BLACK
+    } else {
+        let max_age = 10;
+        let a = age.min(max_age) as u32; // clamp age and use u32 for intermediate math
+        let r = ((31 * a) + 5) / max_age as u32;
+        let g = ((63 * a) + 5) / max_age as u32;
+        let b = 31; // Keep blue channel constant
+        // Convert back to u8 and return the color.
+        Rgb565::new(r as u8, g as u8, b)
     }
 }
 fn draw_grid<D: DrawTarget<Color = Rgb565>>(
@@ -382,24 +396,8 @@ async fn main(_spawner: Spawner) -> ! {
         .with_data14(peripherals.GPIO19)
         .with_data15(peripherals.GPIO12);
 
-    // Draw gradient across full frame directly into PSRAM buffer
-    for y in 0..display_height {
-        let r = ((y * 31) / (display_height - 1)) as u8;
-        let g = ((y * 63) / (display_height - 1)) as u8;
-        let b = r;
-        let color = Rgb565::new(r, g, b);
-        for x in 0..display_width {
-            let idx = (y * display_width + x) * 2;
-            let [lo, hi] = color.into_storage().to_le_bytes();
-            psram_buf[idx] = lo;
-            psram_buf[idx + 1] = hi;
-        }
-    }
-
-    // Set up grid and randomize, but pass to app core for updating
-    let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
-    let mut rng = Rng::new(peripherals.RNG);
-    randomize_grid(&mut rng, &mut *game_grid);
+    // Prepare RNG for app core task
+    let rng_for_app = Rng::new(peripherals.RNG);
 
     // The PSRAM framebuffer is now used for drawing in the Conway task.
     info!("Entering main loop...");
@@ -429,7 +427,7 @@ async fn main(_spawner: Spawner) -> ! {
         static EXECUTOR: StaticCell<Executor> = StaticCell::new();
         let executor = EXECUTOR.init(Executor::new());
         executor.run(|spawner| {
-            spawner.spawn(conway_task(psram_ptr, psram_len)).ok();
+            spawner.spawn(conway_task(psram_ptr, psram_len, rng_for_app)).ok();
         });
     });
 
@@ -460,20 +458,14 @@ async fn main(_spawner: Spawner) -> ! {
 
 // Conway update task running on core 1
 #[embassy_executor::task]
-async fn conway_task(psram_ptr: *mut u8, _psram_len: usize) {
+async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
     // Reconstruct the framebuffer and game grid
     let fb: &mut [Rgb565; LCD_BUFFER_SIZE] =
         unsafe { &mut *(psram_ptr as *mut [Rgb565; LCD_BUFFER_SIZE]) };
     let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
+    randomize_grid(&mut rng, &mut *game_grid);
     let mut next_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
-    // Randomize grid (no hardware RNG on core 1, just use some seed)
-    let mut seed: u32 = 0x12345678;
-    for y in 0..GRID_HEIGHT {
-        for x in 0..GRID_WIDTH {
-            seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-            game_grid[y][x] = if (seed & 1) == 1 { 1 } else { 0 };
-        }
-    }
+
     let mut frame_buf = FrameBuf::new(
         PSRAMFrameBuffer::new(fb),
         LCD_H_RES_USIZE.into(),
