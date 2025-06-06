@@ -198,6 +198,32 @@ cd esp32-c3-lcdkit
 cargo run --release
 ```
 
+### ESoPe SLD\_C\_W\_S3
+
+![ESP32 Conways Game of Life in Rust - ESoPe SLD_C_W_S3](esope-sld-c-w-s3.jpg)
+
+Board: [SDL\C\_W\_S3](https://esope.de/en/products)
+Display: RGB [Schukat Smartwin display-concept](https://shop.schukat.com/de/de/EUR/c/ESOP)
+
+The implementation is based on Embassy Async Rust no\_std with RGB interface.
+Both cores of ESP32-S3 are used. One core is handling DMA transfers to the display, 
+while the other core is running the game logic.
+
+RGB displays are very time-sensitive, so the timing of the display must be precise, that's also why
+one core is dedicated to the display.
+
+The display configuration is stored in EEPROM for this specific display type.
+
+Run:
+```
+esope-sld-c-w-s3
+cargo r -r
+```
+
+The board requires connection using ESP-Prog. You need to switch the board into boot mode.
+Press and hold the BOOT button, then press the RESET button, then release the BOOT button.
+Press the RESET button again to start the program.
+
 ### WASM
 
 This is experimental implementation for WASM.
