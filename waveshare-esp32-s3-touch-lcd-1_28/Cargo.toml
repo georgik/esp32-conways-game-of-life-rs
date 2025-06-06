@@ -29,7 +29,4 @@ embedded-hal-bus = "0.3.0"
 bevy_ecs = { version = "0.16.1", default-features = false }
 
 [features]
-default = [ "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3", "esp32-s3-box-3" ]
-
-# esp32-s3-box-3 = [ "esp-bsp/esp32-s3-box-3", "esp-hal/psram" ]
-esp32-s3-box-3 = [ "esp-hal/psram" ]
+default = [ "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3", "esp-hal/psram" ]
