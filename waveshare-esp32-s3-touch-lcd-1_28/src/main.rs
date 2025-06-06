@@ -3,7 +3,6 @@
 
 extern crate alloc;
 use alloc::boxed::Box;
-use embedded_graphics_framebuf::backends::FrameBufferBackend;
 
 use bevy_ecs::prelude::*;
 use core::fmt::Write;
@@ -16,6 +15,7 @@ use embedded_graphics::{
     text::Text,
 };
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use embedded_hal::delay::DelayNs;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
@@ -23,7 +23,7 @@ use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::{
     Blocking,
-    gpio::{DriveMode, Level, Output, OutputConfig},
+    gpio::{Input, Level, Output, OutputConfig},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
@@ -31,11 +31,9 @@ use esp_hal::{
 };
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::{Builder, models::ILI9486Rgb565};
-use mipidsi::{
-    interface::SpiInterface,
-    options::{ColorInversion, ColorOrder, Orientation},
-}; // includes NonSend and NonSendMut
+use mipidsi::options::ColorOrder;
+use mipidsi::{Builder, models::GC9A01};
+use mipidsi::{interface::SpiInterface, options::ColorInversion};
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -87,12 +85,12 @@ type MyDisplay = mipidsi::Display<
         ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
         Output<'static>,
     >,
-    ILI9486Rgb565,
+    GC9A01,
     Output<'static>,
 >;
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
-const LCD_H_RES: usize = 320;
+const LCD_H_RES: usize = 240;
 const LCD_V_RES: usize = 240;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
@@ -118,8 +116,8 @@ impl FrameBufferResource {
 
 // --- Game of Life Definitions ---
 // Now each cell is a u8 (0 means dead; >0 indicates age)
-const GRID_WIDTH: usize = 64;
-const GRID_HEIGHT: usize = 48;
+const GRID_WIDTH: usize = 35;
+const GRID_HEIGHT: usize = 35;
 const RESET_AFTER_GENERATIONS: usize = 500;
 
 fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
@@ -171,7 +169,7 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     *grid = new_grid;
 }
 
-/// Maps cell age (1...=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
+/// Maps cell age (1..=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
 fn age_to_color(age: u8) -> Rgb565 {
     if age == 0 {
         Rgb565::BLACK
@@ -219,14 +217,17 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
     generation: usize,
 ) -> Result<(), D::Error> {
+    let x = 70;
+    let y = 140;
+
     let mut num_str = heapless::String::<20>::new();
-    write!(num_str, "{}", generation).unwrap();
+    write!(num_str, "Generation: {}", generation).unwrap();
     Text::new(
         num_str.as_str(),
-        Point::new(8, 13),
+        Point::new(x, y),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-    .draw(display)?;
+        .draw(display)?;
     Ok(())
 }
 
@@ -256,6 +257,16 @@ struct DisplayResource {
     display: MyDisplay,
 }
 
+struct ButtonResource {
+    button: Input<'static>,
+}
+
+/// Resource to track the previous state of the button (for edge detection).
+#[derive(Default, Resource)]
+struct ButtonState {
+    was_pressed: bool,
+}
+
 fn update_game_of_life_system(
     mut game: ResMut<GameOfLifeResource>,
     mut rng_res: ResMut<RngResource>,
@@ -265,6 +276,26 @@ fn update_game_of_life_system(
     if game.generation >= RESET_AFTER_GENERATIONS {
         randomize_grid(&mut rng_res.0, &mut game.grid);
         game.generation = 0;
+    }
+}
+
+/// System to check the button and reset the simulation when pressed.
+fn button_reset_system(
+    mut game: ResMut<GameOfLifeResource>,
+    mut rng_res: ResMut<RngResource>,
+    mut btn_state: ResMut<ButtonState>,
+    button_res: NonSend<ButtonResource>,
+) {
+    // Check if the button is pressed (active low)
+    if button_res.button.is_low() {
+        if !btn_state.was_pressed {
+            // Button press detected: reset simulation.
+            randomize_grid(&mut rng_res.0, &mut game.grid);
+            game.generation = 0;
+            btn_state.was_pressed = true;
+        }
+    } else {
+        btn_state.was_pressed = false;
     }
 }
 
@@ -297,15 +328,15 @@ fn render_system(
         Point::new(x1, y),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-    .draw(&mut fb_res.frame_buf)
-    .unwrap();
+        .draw(&mut fb_res.frame_buf)
+        .unwrap();
     Text::new(
         line2,
         Point::new(x2, y + 14),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-    .draw(&mut fb_res.frame_buf)
-    .unwrap();
+        .draw(&mut fb_res.frame_buf)
+        .unwrap();
 
     // Define the area covering the entire framebuffer.
     let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
@@ -319,16 +350,12 @@ fn render_system(
 #[main]
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
-
-    // PSRAM allocator for heap memory.
-    // Note: Placing framebuffer into PSRAM might result into slower redraw.
-    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
-    // esp_alloc::heap_allocator!(size: 150 * 1024);
-
+    // Increase heap size as needed.
+    esp_alloc::heap_allocator!(size: 150000);
     init_logger_from_env();
 
     // --- DMA Buffers for SPI ---
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(8912);
+    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(1024);
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
 
@@ -336,20 +363,21 @@ fn main() -> ! {
     let spi = Spi::<Blocking>::new(
         peripherals.SPI2,
         esp_hal::spi::master::Config::default()
-            .with_frequency(Rate::from_mhz(40))
+            .with_frequency(Rate::from_mhz(80))
             .with_mode(esp_hal::spi::Mode::_0),
     )
-    .unwrap()
-    .with_sck(peripherals.GPIO7)
-    .with_mosi(peripherals.GPIO6)
-    .with_dma(peripherals.DMA_CH0)
-    .with_buffers(dma_rx_buf, dma_tx_buf);
-    let cs_output = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
+        .unwrap()
+        .with_sck(peripherals.GPIO10)
+        .with_mosi(peripherals.GPIO11)
+        .with_dma(peripherals.DMA_CH0)
+        // .with_miso(peripherals.GPIO14)
+        .with_buffers(dma_rx_buf, dma_tx_buf);
+    let cs_output = Output::new(peripherals.GPIO9, Level::High, OutputConfig::default());
     let spi_delay = Delay::new();
     let spi_device = ExclusiveDevice::new(spi, cs_output, spi_delay).unwrap();
 
-    // LCD interface: DC = GPIO4.
-    let lcd_dc = Output::new(peripherals.GPIO4, Level::Low, OutputConfig::default());
+    // LCD interface
+    let lcd_dc = Output::new(peripherals.GPIO8, Level::Low, OutputConfig::default());
     // Leak a Box to obtain a 'static mutable buffer.
     let buffer: &'static mut [u8; 512] = Box::leak(Box::new([0_u8; 512]));
     let di = SpiInterface::new(spi_device, lcd_dc, buffer);
@@ -357,26 +385,22 @@ fn main() -> ! {
     let mut display_delay = Delay::new();
     display_delay.delay_ns(500_000u32);
 
-    // Reset pin: OpenDrain required for ESP32-S3-BOX! Tricky setting.
-    let reset = Output::new(
-        peripherals.GPIO48,
-        Level::High,
-        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
-    );
+    // Reset pin
+    let reset = Output::new(peripherals.GPIO14, Level::Low, OutputConfig::default());
     // Initialize the display using mipidsi's builder.
-    let mut display: MyDisplay = Builder::new(ILI9486Rgb565, di)
+    let mut display: MyDisplay = Builder::new(GC9A01, di)
         .reset_pin(reset)
-        .display_size(320, 240)
+        .display_size(240, 240)
         // .orientation(Orientation::new().flip_horizontal())
         .color_order(ColorOrder::Bgr)
-        // .invert_colors(ColorInversion::Inverted)
+        .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)
         .unwrap();
 
-    display.clear(Rgb565::BLUE).unwrap();
+    display.clear(Rgb565::BLACK).unwrap();
 
-    // Backlight.
-    let mut backlight = Output::new(peripherals.GPIO47, Level::Low, OutputConfig::default());
+    // Backlight
+    let mut backlight = Output::new(peripherals.GPIO2, Level::High, OutputConfig::default());
     backlight.set_high();
 
     info!("Display initialized");
@@ -401,7 +425,18 @@ fn main() -> ! {
     // Insert the framebuffer resource as a normal resource.
     world.insert_resource(fb_res);
 
+    // --- Initialize Button Resource ---
+    // Configure the button as an input with an internal pull-up (active low).
+    // let button = Input::new(
+    //     peripherals.GPIO9,
+    //     InputConfig::default().with_pull(Pull::Up),
+    // );
+    // world.insert_non_send_resource(ButtonResource { button });
+    // Insert a resource to track button state for debouncing.
+    // world.insert_resource(ButtonState::default());
+
     let mut schedule = Schedule::default();
+    // schedule.add_systems(button_reset_system);
     schedule.add_systems(update_game_of_life_system);
     schedule.add_systems(render_system);
 

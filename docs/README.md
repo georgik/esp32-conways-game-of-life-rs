@@ -19,7 +19,7 @@ cd esp32-s3-box-3-minimal
 cargo run --release
 ```
 
-### ESP32-C6-LCD-1.47 Waveshare
+### Waveshare ESP32-C6-LCD 1.47
 
 [Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on 1.47 inch [ESP32-C6 LCD Waheshare](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer - [Conway's Game of Life](https://github.com/georgik/esp32-conways-game-of-life-rs/tree/main/esp32-c6-waveshare-1_47):
 
@@ -27,10 +27,23 @@ cargo run --release
 View the video [here](https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76).
 </video>
 
-The implementation is based on Rust no\_std and Bevy 0.15 no\_std, plus mipidsi crate
+The implementation is based on Rust no\_std and Bevy 0.16 no\_std, plus mipidsi crate.
 
 ```
-cd esp32-c6-waveshare-1_47
+cd waveshare-esp32-c6-lcd-1_28
+cargo run --release
+```
+
+### Waveshare ESP32-S3-Touch-LCD 1.28
+
+![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch LCD with Bevy ECS](waveshare-esp32-s3-touch-lcd-1_28.jpg)
+
+[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waheshare ESP32-S3 LCD Touch 1.28 inch](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer:
+
+The implementation is based on Rust no\_std and Bevy 0.16 no\_std, plus mipidsi crate.
+
+```
+cd waveshare-esp32-s3-touch-lcd-1_28
 cargo run --release
 ```
 
