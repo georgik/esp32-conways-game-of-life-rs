@@ -18,7 +18,7 @@ on:
       board:
         description: 'Target directory for the ESP32-C3 project (e.g. esp32-c3-lcdkit)'
         required: true
-        default: 'esp32-c6-waveshare-1_47'
+        default: 'waveshare-esp32-c6-1_47'
 
 
 env:
