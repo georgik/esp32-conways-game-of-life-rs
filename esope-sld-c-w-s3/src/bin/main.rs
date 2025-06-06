@@ -1,5 +1,9 @@
 #![no_std]
 #![no_main]
+use core::fmt::Write;
+use embedded_graphics::mono_font::{ascii::FONT_8X13, MonoTextStyle};
+use embedded_graphics::text::Text;
+use heapless::String;
 
 use esp_hal::dma::ExternalBurstConfig;
 
@@ -148,15 +152,6 @@ fn update_game_of_life(
     }
 }
 
-// fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
-//     for y in 0..GRID_HEIGHT {
-//         for x in 0..GRID_WIDTH {
-//             let val = rng.random();
-//             grid[y][x] = if val & 1 == 1 { 1 } else { 0 };
-//         }
-//     }
-// }
-
 fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
@@ -177,7 +172,7 @@ fn age_to_color(age: u8) -> Rgb565 {
         let r = ((31 * a) + 5) / max_age as u32;
         let g = ((63 * a) + 5) / max_age as u32;
         let b = 31; // Keep blue channel constant
-        // Convert back to u8 and return the color.
+                    // Convert back to u8 and return the color.
         Rgb565::new(r as u8, g as u8, b)
     }
 }
@@ -206,6 +201,20 @@ fn draw_grid<D: DrawTarget<Color = Rgb565>>(
             }
         }
     }
+    Ok(())
+}
+fn write_generation<D: DrawTarget<Color = Rgb565>>(
+    display: &mut D,
+    generation: usize,
+) -> Result<(), D::Error> {
+    let mut num_str = String::<20>::new();
+    write!(num_str, "{}", generation).unwrap();
+    Text::new(
+        num_str.as_str(),
+        Point::new(8, 13),
+        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
+    )
+    .draw(display)?;
     Ok(())
 }
 const LCD_H_RES_USIZE: usize = 320;
@@ -427,7 +436,9 @@ async fn main(_spawner: Spawner) -> ! {
         static EXECUTOR: StaticCell<Executor> = StaticCell::new();
         let executor = EXECUTOR.init(Executor::new());
         executor.run(|spawner| {
-            spawner.spawn(conway_task(psram_ptr, psram_len, rng_for_app)).ok();
+            spawner
+                .spawn(conway_task(psram_ptr, psram_len, rng_for_app))
+                .ok();
         });
     });
 
@@ -472,6 +483,8 @@ async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
         LCD_V_RES_USIZE.into(),
     );
     let mut ticker = Ticker::every(embassy_time::Duration::from_millis(100));
+    let mut generation_count: usize = 0;
+    const RESET_AFTER_GENERATIONS: usize = 500;
     loop {
         // Log message with core number
         // println!(
@@ -482,6 +495,12 @@ async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
         update_game_of_life(&*game_grid, &mut *next_grid);
         core::mem::swap(&mut game_grid, &mut next_grid);
         draw_grid(&mut frame_buf, &*game_grid).ok();
+        generation_count += 1;
+        write_generation(&mut frame_buf, generation_count).ok();
+        if generation_count >= RESET_AFTER_GENERATIONS {
+            randomize_grid(&mut rng, &mut *game_grid);
+            generation_count = 0;
+        }
         ticker.next().await;
     }
 }
