@@ -261,7 +261,7 @@ async fn main(_spawner: Spawner) -> ! {
     const MAX_FRAME_BYTES: usize = 320 * 240 * 2;
     const MAX_NUM_DMA_DESC: usize = (MAX_FRAME_BYTES + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
-    #[link_section = ".dma"]
+    #[unsafe(link_section = ".dma")]
     static mut TX_DESCRIPTORS: [DmaDescriptor; MAX_NUM_DMA_DESC] =
         [DmaDescriptor::EMPTY; MAX_NUM_DMA_DESC];
 
@@ -413,7 +413,7 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Configure a single DMA buffer over the whole PSRAM region with 64‑byte bursts
     let mut dma_tx: DmaTxBuf = unsafe {
-        DmaTxBuf::new_with_config(&mut TX_DESCRIPTORS, psram_buf, ExternalBurstConfig::Size64)
+        DmaTxBuf::new_with_config(&mut *core::ptr::addr_of_mut!(TX_DESCRIPTORS), psram_buf, ExternalBurstConfig::Size64)
             .unwrap()
     };
 
@@ -424,14 +424,20 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Spawn Conway update task on app core (core 1)
     let mut cpu_control = CpuControl::new(peripherals.CPU_CTRL);
-    let _app_core = cpu_control.start_app_core(unsafe { &mut APP_CORE_STACK }, move || {
+    let _app_core = cpu_control.start_app_core(unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) }, move || {
         // Initialize Embassy time driver on app core
         esp_hal_embassy::init([timer0, timer1]);
         // SAFETY: PSRAM_BUF_PTR and PSRAM_BUF_LEN are published before
         let psram_ptr = unsafe { PSRAM_BUF_PTR };
         let psram_len = unsafe { PSRAM_BUF_LEN };
         // Wait until PSRAM is ready
-        PSRAM_READY.wait();
+        loop {
+            if PSRAM_READY.try_take().is_some() {
+                break;
+            }
+            // Simple spin wait
+            core::hint::spin_loop();
+        }
         // Initialize and run Embassy executor on app core
         static EXECUTOR: StaticCell<Executor> = StaticCell::new();
         let executor = EXECUTOR.init(Executor::new());

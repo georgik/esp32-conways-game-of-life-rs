@@ -1,5 +1,5 @@
 [package]
-edition = "2021"
+edition = "2024"
 name    = "esp32-conways-game-of-life-rs"
 version = "0.7.0"
 
