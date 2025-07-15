@@ -448,24 +448,36 @@ async fn main(_spawner: Spawner) -> ! {
         });
     });
 
-    // Core 0: Only send DMA frames in a loop
+// Core 0: Run render task
+    static MAIN_EXECUTOR: StaticCell<Executor> = StaticCell::new();
+    let executor = MAIN_EXECUTOR.init(Executor::new());
+    executor.run(|spawner| {
+        spawner.spawn(render_task(dpi, dma_tx)).ok();
+    });
+}
+
+// Render task running on core 0
+#[embassy_executor::task]
+async fn render_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: DmaTxBuf) {
+    info!("[CORE 0] Render task started, sending DMA frames");
+
     loop {
-        // println!("Core {}: Pushing DMA data...", Cpu::current() as usize);
         let safe_chunk_size = 320 * 240 * 2;
-        let frame_bytes = display_width * display_height * 2;
+        let frame_bytes = 320 * 240 * 2; // Fixed to known display size
         let len = safe_chunk_size.min(frame_bytes);
         dma_tx.set_length(len);
+
         match dpi.send(false, dma_tx) {
             Ok(xfer) => {
                 let (res, new_dpi, new_dma_tx) = xfer.wait();
                 dpi = new_dpi;
                 dma_tx = new_dma_tx;
                 if let Err(e) = res {
-                    error!("DMA transfer error: {:?}", e);
+                    error!("[CORE 0] DMA transfer error: {:?}", e);
                 }
             }
             Err((e, new_dpi, new_dma_tx)) => {
-                error!("DMA send error: {:?}", e);
+                error!("[CORE 0] DMA send error: {:?}", e);
                 dpi = new_dpi;
                 dma_tx = new_dma_tx;
             }
