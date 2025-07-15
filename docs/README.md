@@ -216,7 +216,7 @@ The display configuration is stored in EEPROM for this specific display type.
 
 Run:
 ```
-esope-sld-c-w-s3
+cd esope-sld-c-w-s3
 cargo r -r
 ```
 
