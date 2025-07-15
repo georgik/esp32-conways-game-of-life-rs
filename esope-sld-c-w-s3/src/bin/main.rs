@@ -379,7 +379,7 @@ async fn main(_spawner: Spawner) -> ! {
         })
         .with_disable_black_region(false);
 
-    let mut dpi = Dpi::new(lcd_cam.lcd, peripherals.DMA_CH2, dpi_config)
+    let dpi = Dpi::new(lcd_cam.lcd, peripherals.DMA_CH2, dpi_config)
         .unwrap()
         .with_vsync(peripherals.GPIO6)
         .with_hsync(peripherals.GPIO15)
@@ -412,7 +412,7 @@ async fn main(_spawner: Spawner) -> ! {
     info!("Entering main loop...");
 
     // Configure a single DMA buffer over the whole PSRAM region with 64‑byte bursts
-    let mut dma_tx: DmaTxBuf = unsafe {
+    let dma_tx: DmaTxBuf = unsafe {
         DmaTxBuf::new_with_config(&mut *core::ptr::addr_of_mut!(TX_DESCRIPTORS), psram_buf, ExternalBurstConfig::Size64)
             .unwrap()
     };
@@ -422,50 +422,64 @@ async fn main(_spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let timer0: AnyTimer = timg0.timer0.into();
 
-    // Spawn Conway update task on app core (core 1)
+    // Spawn DMA display task on app core (core 1)
     let mut cpu_control = CpuControl::new(peripherals.CPU_CTRL);
     let _app_core = cpu_control.start_app_core(unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) }, move || {
         // Initialize Embassy time driver on app core
         esp_hal_embassy::init([timer0, timer1]);
-        // SAFETY: PSRAM_BUF_PTR and PSRAM_BUF_LEN are published before
-        let psram_ptr = unsafe { PSRAM_BUF_PTR };
-        let psram_len = unsafe { PSRAM_BUF_LEN };
-        // Wait until PSRAM is ready
-        loop {
-            if PSRAM_READY.try_take().is_some() {
-                break;
-            }
-            // Simple spin wait
-            core::hint::spin_loop();
-        }
+        info!("[CORE 1] App core started, initializing DMA display task");
         // Initialize and run Embassy executor on app core
         static EXECUTOR: StaticCell<Executor> = StaticCell::new();
         let executor = EXECUTOR.init(Executor::new());
         executor.run(|spawner| {
             spawner
-                .spawn(conway_task(psram_ptr, psram_len, rng_for_app))
+                .spawn(dma_display_task(dpi, dma_tx))
                 .ok();
         });
     });
 
-    // Core 0: Only send DMA frames in a loop
+    // Core 0: Run Conway task
+    // Wait until PSRAM is ready
     loop {
-        // println!("Core {}: Pushing DMA data...", Cpu::current() as usize);
+        if PSRAM_READY.try_take().is_some() {
+            break;
+        }
+        // Simple spin wait
+        core::hint::spin_loop();
+    }
+    // SAFETY: PSRAM_BUF_PTR and PSRAM_BUF_LEN are published before
+    let psram_ptr = unsafe { PSRAM_BUF_PTR };
+    let psram_len = unsafe { PSRAM_BUF_LEN };
+
+    static MAIN_EXECUTOR: StaticCell<Executor> = StaticCell::new();
+    let executor = MAIN_EXECUTOR.init(Executor::new());
+    executor.run(|spawner| {
+        spawner.spawn(conway_task(psram_ptr, psram_len, rng_for_app)).ok();
+    });
+}
+
+// DMA display task running on core 1
+#[embassy_executor::task]
+async fn dma_display_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: DmaTxBuf) {
+    info!("[CORE 1] DMA display task started, sending DMA frames");
+
+    loop {
         let safe_chunk_size = 320 * 240 * 2;
-        let frame_bytes = display_width * display_height * 2;
+        let frame_bytes = 320 * 240 * 2; // Fixed to known display size
         let len = safe_chunk_size.min(frame_bytes);
         dma_tx.set_length(len);
+
         match dpi.send(false, dma_tx) {
             Ok(xfer) => {
                 let (res, new_dpi, new_dma_tx) = xfer.wait();
                 dpi = new_dpi;
                 dma_tx = new_dma_tx;
                 if let Err(e) = res {
-                    error!("DMA transfer error: {:?}", e);
+                    error!("[CORE 1] DMA transfer error: {:?}", e);
                 }
             }
             Err((e, new_dpi, new_dma_tx)) => {
-                error!("DMA send error: {:?}", e);
+                error!("[CORE 1] DMA send error: {:?}", e);
                 dpi = new_dpi;
                 dma_tx = new_dma_tx;
             }
@@ -473,7 +487,7 @@ async fn main(_spawner: Spawner) -> ! {
     }
 }
 
-// Conway update task running on core 1
+// Conway update task running on core 0
 #[embassy_executor::task]
 async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
     // Reconstruct the framebuffer and game grid
