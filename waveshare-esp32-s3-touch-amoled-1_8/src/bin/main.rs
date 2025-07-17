@@ -14,37 +14,66 @@ use embedded_graphics::{
     Drawable,
 };
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
-use embedded_graphics_framebuf::FrameBuf;
 
-use embassy_executor::Spawner;
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::signal::Signal;
-use embassy_time::Ticker;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
+use esp_hal::main;
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::spi::Mode;
 use esp_hal::time::Rate;
-use esp_hal::timer::{timg::TimerGroup, AnyTimer};
-use esp_hal_embassy::Executor;
-use log::{error, info};
-use static_cell::StaticCell;
+use log::info;
 
 use esp_hal::rng::Rng;
-use esp_hal::system::{CpuControl, Stack};
 use esp_println::logger::init_logger_from_env;
 use esp_println::println;
-use esp_backtrace as _;
+
+// Custom panic handler for better debugging
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    // Print panic information
+    println!("\n=== PANIC OCCURRED ===");
+    
+    // Print panic location if available
+    if let Some(location) = info.location() {
+        println!("Panic occurred at {}:{}:{}", location.file(), location.line(), location.column());
+    } else {
+        println!("Panic occurred at unknown location");
+    }
+    
+    // Print panic message if available
+    let message = info.message();
+    println!("Panic message: {}", message);
+    
+    // Print memory information
+    println!("\n=== MEMORY INFO ===");
+    println!("Stack pointer: unavailable (assembly removed)");
+    
+    // Print some general debug info
+    println!("\n=== DEBUG INFO ===");
+    println!("Target: unknown"); // The TARGET env variable is not set during runtime
+    println!("Profile: {}", if cfg!(debug_assertions) { "debug" } else { "release" });
+    
+    // Force a flush to ensure all output is printed
+    println!("\n=== ENTERING PANIC LOOP ===");
+    
+    // Custom panic handler loop - no automatic reset
+    // The system will remain in this loop until manually reset
+    loop {
+        // Small delay to prevent overwhelming the output
+        for _ in 0..1000000 {
+            core::hint::spin_loop();
+        }
+    }
+}
 
 use sh8601_rs::{
     framebuffer_size, ColorMode, DisplaySize, ResetDriver, Sh8601Driver, Ws18AmoledDriver,
     DMA_CHUNK_SIZE,
 };
 
-// esp-backtrace handles panic, so we don't need a custom panic handler
 
 extern crate alloc;
 
@@ -88,7 +117,7 @@ const DISPLAY_SIZE: DisplaySize = DisplaySize::new(368, 448);
 const FB_SIZE: usize = framebuffer_size(DISPLAY_SIZE, ColorMode::Rgb888);
 
 // Type alias for the display driver
-type DisplayDriver = Sh8601Driver<Ws18AmoledDriver<esp_hal::spi::master::Spi<'static, esp_hal::spi::SPI2, esp_hal::dma::DmaChannel0>>, ResetDriver<esp_hal::i2c::master::I2c<'static, esp_hal::i2c::I2C0>>>;
+type DisplayDriver = Sh8601Driver<Ws18AmoledDriver, ResetDriver>;
 
 // Conway's Game of Life grid configuration
 const GRID_WIDTH: usize = 52;  // 368 / 7 ≈ 52
@@ -192,24 +221,22 @@ fn write_generation<D: DrawTarget<Color = Rgb888>>(
     Ok(())
 }
 
-// Embassy multicore: allocate app core stack
-static mut APP_CORE_STACK: Stack<8192> = Stack::new();
-static DISPLAY_READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
-
-#[esp_hal_embassy::main]
-async fn main(_spawner: Spawner) -> ! {
+#[main]
+fn main() -> ! {
+    println!("[MAIN] Starting main function");
+    
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    println!("[MAIN] Config created");
+    
     let peripherals = esp_hal::init(config);
+    println!("[MAIN] Peripherals initialized");
     
-    // Initialize TimerGroup and timer1 for app core Embassy time driver
-    let timg1 = TimerGroup::new(peripherals.TIMG1);
-    let timer1: AnyTimer = timg1.timer0.into();
-    
-    println!("Starting up...");
+    println!("[MAIN] Starting up...");
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
-    println!("PSRAM allocator initialized");
+    println!("[MAIN] PSRAM allocator initialized");
 
     init_logger_from_env();
+    println!("[MAIN] Logger initialized");
 
     let delay = Delay::new();
 
@@ -262,7 +289,7 @@ async fn main(_spawner: Spawner) -> ! {
         delay,
     );
     
-    let display = match display_res {
+    let mut display = match display_res {
         Ok(d) => {
             println!("Display initialized successfully.");
             d
@@ -273,61 +300,18 @@ async fn main(_spawner: Spawner) -> ! {
         }
     };
 
-    // Leak the display to get a static reference
-    let display_ref = Box::leak(Box::new(display));
+    // Initialize RNG
+    let mut rng = Rng::new(peripherals.RNG);
 
-    // Prepare RNG for app core task
-    let rng_for_app = Rng::new(peripherals.RNG);
-
-    info!("Entering main loop...");
-
-    // Signal to app core that display is ready
-    DISPLAY_READY.signal(());
-    
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: AnyTimer = timg0.timer0.into();
-
-    // Spawn Conway task on app core (core 1)
-    let mut cpu_control = CpuControl::new(peripherals.CPU_CTRL);
-    let _app_core = cpu_control.start_app_core(unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) }, move || {
-        // Initialize Embassy time driver on app core
-        esp_hal_embassy::init([timer0, timer1]);
-        info!("[CORE 1] App core started, initializing Conway task");
-        
-        // Initialize and run Embassy executor on app core
-        static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-        let executor = EXECUTOR.init(Executor::new());
-        executor.run(|spawner| {
-            spawner
-                .spawn(conway_task(display_ref, rng_for_app))
-                .ok();
-        });
-    });
-
-    // Core 0: Keep main thread alive
-    loop {
-        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
-    }
-}
-
-// Conway update task running on core 1
-#[embassy_executor::task]
-async fn conway_task(display: &'static mut DisplayDriver, mut rng: Rng) {
-    // Wait until display is ready
-    loop {
-        if DISPLAY_READY.try_take().is_some() {
-            break;
-        }
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(10)).await;
-    }
-
+    // Initialize game grids
     let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
     randomize_grid(&mut rng, &mut *game_grid);
     let mut next_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
-
-    let mut ticker = Ticker::every(embassy_time::Duration::from_millis(150));
+    
     let mut generation_count: usize = 0;
     const RESET_AFTER_GENERATIONS: usize = 300;
+    
+    info!("Entering main loop...");
     
     loop {
         // Clear display
@@ -338,13 +322,13 @@ async fn conway_task(display: &'static mut DisplayDriver, mut rng: Rng) {
         core::mem::swap(&mut game_grid, &mut next_grid);
         
         // Draw grid
-        draw_grid(display, &*game_grid).ok();
+        draw_grid(&mut display, &*game_grid).ok();
         generation_count += 1;
-        write_generation(display, generation_count).ok();
+        write_generation(&mut display, generation_count).ok();
         
         // Flush display
         if let Err(e) = display.flush() {
-            error!("Error flushing display: {:?}", e);
+            println!("Error flushing display: {:?}", e);
         }
         
         // Reset after a certain number of generations
@@ -353,6 +337,8 @@ async fn conway_task(display: &'static mut DisplayDriver, mut rng: Rng) {
             generation_count = 0;
         }
         
-        ticker.next().await;
+        // Simple delay
+        esp_hal::delay::Delay::new().delay_millis(150);
     }
 }
+
