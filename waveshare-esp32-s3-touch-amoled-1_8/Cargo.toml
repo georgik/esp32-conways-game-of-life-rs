@@ -18,6 +18,7 @@ embedded-graphics-framebuf = "0.5.0"
 heapless = "0.8.0"
 sh8601-rs = { version = "0.1.4", features = ["waveshare_18_amoled"] }
 embedded-hal-bus = "0.3.0"
+bevy_ecs = { version = "0.16.1", default-features = false }
 
 [profile.dev]
 # Rust debug is too slow.

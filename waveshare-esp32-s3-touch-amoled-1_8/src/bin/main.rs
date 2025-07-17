@@ -1,19 +1,22 @@
 #![no_std]
 #![no_main]
 
-use core::fmt::Write;
-use embedded_graphics::mono_font::{ascii::FONT_8X13, MonoTextStyle};
-use embedded_graphics::text::Text;
-use heapless::String;
+extern crate alloc;
 
 use alloc::boxed::Box;
+use bevy_ecs::prelude::*;
+use core::fmt::Write;
 use embedded_graphics::{
     pixelcolor::Rgb888,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
     Drawable,
+    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    text::Text,
 };
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
+use embedded_graphics_framebuf::FrameBuf;
+use heapless::String;
 
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
@@ -73,9 +76,6 @@ use sh8601_rs::{
     framebuffer_size, ColorMode, DisplaySize, ResetDriver, Sh8601Driver, Ws18AmoledDriver,
     DMA_CHUNK_SIZE,
 };
-
-
-extern crate alloc;
 
 /// A wrapper around a boxed array that implements FrameBufferBackend.
 pub struct HeapBuffer<C: PixelColor, const N: usize>(Box<[C; N]>);
@@ -221,6 +221,153 @@ fn write_generation<D: DrawTarget<Color = Rgb888>>(
     Ok(())
 }
 
+// --- Bevy ECS Resources ---
+
+// Framebuffer resource for double buffering
+const LCD_H_RES: usize = 368;
+const LCD_V_RES: usize = 448;
+const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
+
+type FbBuffer = HeapBuffer<Rgb888, LCD_BUFFER_SIZE>;
+type MyFrameBuf = FrameBuf<Rgb888, FbBuffer>;
+
+#[derive(Resource)]
+struct FrameBufferResource {
+    frame_buf: MyFrameBuf,
+}
+
+impl FrameBufferResource {
+    fn new() -> Self {
+        let fb_data: Box<[Rgb888; LCD_BUFFER_SIZE]> = Box::new([Rgb888::BLACK; LCD_BUFFER_SIZE]);
+        let heap_buffer = HeapBuffer::new(fb_data);
+        let frame_buf = MyFrameBuf::new(heap_buffer, LCD_H_RES, LCD_V_RES);
+        Self { frame_buf }
+    }
+}
+
+#[derive(Resource)]
+struct GameOfLifeResource {
+    grid: [[u8; GRID_WIDTH]; GRID_HEIGHT],
+    next_grid: [[u8; GRID_WIDTH]; GRID_HEIGHT],
+    generation: usize,
+}
+
+impl Default for GameOfLifeResource {
+    fn default() -> Self {
+        Self {
+            grid: [[0; GRID_WIDTH]; GRID_HEIGHT],
+            next_grid: [[0; GRID_WIDTH]; GRID_HEIGHT],
+            generation: 0,
+        }
+    }
+}
+
+#[derive(Resource)]
+struct RngResource(Rng);
+
+// Display resource - NonSend because it contains non-thread-safe components
+struct DisplayResource {
+    display: DisplayDriver,
+}
+
+// --- Bevy ECS Systems ---
+
+const RESET_AFTER_GENERATIONS: usize = 300;
+
+fn update_game_of_life_system(
+    mut game: ResMut<GameOfLifeResource>,
+    mut rng_res: ResMut<RngResource>,
+) {
+    // Create a temporary copy of the grid to avoid borrowing issues
+    let temp_grid = game.grid;
+    update_game_of_life(&temp_grid, &mut game.next_grid);
+    
+    // Swap the grids by copying instead of using mem::swap to avoid borrowing issues
+    let temp = game.grid;
+    game.grid = game.next_grid;
+    game.next_grid = temp;
+    
+    game.generation += 1;
+    
+    if game.generation >= RESET_AFTER_GENERATIONS {
+        randomize_grid(&mut rng_res.0, &mut game.grid);
+        game.generation = 0;
+    }
+}
+
+fn render_system(
+    mut display_res: NonSendMut<DisplayResource>,
+    game: Res<GameOfLifeResource>,
+    mut fb_res: ResMut<FrameBufferResource>,
+) {
+    // Clear the framebuffer
+    fb_res.frame_buf.clear(Rgb888::BLACK).unwrap();
+    
+    // Draw the game grid
+    draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
+    write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
+    
+    // Add centered text overlay
+    let line1 = "Rust no_std ESP32-S3";
+    let line2 = "Bevy ECS 0.16 no_std";
+    let line3 = "AMOLED Display";
+    
+    // Calculate text positioning
+    let line1_width = line1.len() as i32 * 8;
+    let line2_width = line2.len() as i32 * 8;
+    let line3_width = line3.len() as i32 * 8;
+    
+    let x1 = (LCD_H_RES as i32 - line1_width) / 2;
+    let x2 = (LCD_H_RES as i32 - line2_width) / 2;
+    let x3 = (LCD_H_RES as i32 - line3_width) / 2;
+    
+    let y_center = (LCD_V_RES as i32 - 42) / 2;
+    
+    Text::new(
+        line1,
+        Point::new(x1, y_center),
+        MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE),
+    )
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
+    
+    Text::new(
+        line2,
+        Point::new(x2, y_center + 14),
+        MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE),
+    )
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
+    
+    Text::new(
+        line3,
+        Point::new(x3, y_center + 28),
+        MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE),
+    )
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
+    
+    // Draw the framebuffer content directly to the display
+    // Clear the display first
+    display_res.display.clear(Rgb888::BLACK).ok();
+    
+    // Draw each pixel from the framebuffer as a 1x1 rectangle
+    for (y, row) in fb_res.frame_buf.data.chunks_exact(LCD_H_RES).enumerate() {
+        for (x, &pixel) in row.iter().enumerate() {
+            if pixel != Rgb888::BLACK {
+                let point = Point::new(x as i32, y as i32);
+                Rectangle::new(point, Size::new(1, 1))
+                    .into_styled(PrimitiveStyle::with_fill(pixel))
+                    .draw(&mut display_res.display)
+                    .ok();
+            }
+        }
+    }
+    
+    // Flush the display
+    display_res.display.flush().ok();
+}
+
 #[main]
 fn main() -> ! {
     println!("[MAIN] Starting main function");
@@ -289,7 +436,7 @@ fn main() -> ! {
         delay,
     );
     
-    let mut display = match display_res {
+    let display = match display_res {
         Ok(d) => {
             println!("Display initialized successfully.");
             d
@@ -303,42 +450,42 @@ fn main() -> ! {
     // Initialize RNG
     let mut rng = Rng::new(peripherals.RNG);
 
-    // Initialize game grids
-    let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
-    randomize_grid(&mut rng, &mut *game_grid);
-    let mut next_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
+    // Initialize game resources
+    let mut game = GameOfLifeResource::default();
+    randomize_grid(&mut rng, &mut game.grid);
     
-    let mut generation_count: usize = 0;
-    const RESET_AFTER_GENERATIONS: usize = 300;
+    // Add a glider pattern
+    let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
+    for (x, y) in glider.iter() {
+        if *x < GRID_WIDTH && *y < GRID_HEIGHT {
+            game.grid[*y][*x] = 1;
+        }
+    }
     
-    info!("Entering main loop...");
+    // Create framebuffer resource
+    let fb_res = FrameBufferResource::new();
+    
+    // Initialize Bevy ECS World
+    let mut world = World::default();
+    world.insert_resource(game);
+    world.insert_resource(RngResource(rng));
+    world.insert_resource(fb_res);
+    
+    // Insert display as NonSend resource
+    world.insert_non_send_resource(DisplayResource { display });
+    
+    // Create schedule and add systems
+    let mut schedule = Schedule::default();
+    schedule.add_systems(update_game_of_life_system);
+    schedule.add_systems(render_system);
+    
+    let loop_delay = Delay::new();
+    
+    info!("Entering Bevy ECS main loop...");
     
     loop {
-        // Clear display
-        display.clear(Rgb888::BLACK).ok();
-        
-        // Update game of life
-        update_game_of_life(&*game_grid, &mut *next_grid);
-        core::mem::swap(&mut game_grid, &mut next_grid);
-        
-        // Draw grid
-        draw_grid(&mut display, &*game_grid).ok();
-        generation_count += 1;
-        write_generation(&mut display, generation_count).ok();
-        
-        // Flush display
-        if let Err(e) = display.flush() {
-            println!("Error flushing display: {:?}", e);
-        }
-        
-        // Reset after a certain number of generations
-        if generation_count >= RESET_AFTER_GENERATIONS {
-            randomize_grid(&mut rng, &mut *game_grid);
-            generation_count = 0;
-        }
-        
-        // Simple delay
-        esp_hal::delay::Delay::new().delay_millis(150);
+        schedule.run(&mut world);
+        loop_delay.delay_millis(50);
     }
 }
 
