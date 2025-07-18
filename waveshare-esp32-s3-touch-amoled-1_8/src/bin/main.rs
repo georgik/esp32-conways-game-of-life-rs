@@ -7,15 +7,15 @@ use alloc::boxed::Box;
 use bevy_ecs::prelude::*;
 use core::fmt::Write;
 use embedded_graphics::{
+    Drawable,
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::Rgb888,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
-    Drawable,
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
     text::Text,
 };
-use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use heapless::String;
 
 use esp_hal::clock::CpuClock;
@@ -24,8 +24,8 @@ use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::main;
-use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::spi::Mode;
+use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::time::Rate;
 use log::info;
 
@@ -38,30 +38,42 @@ use esp_println::println;
 fn panic(info: &core::panic::PanicInfo) -> ! {
     // Print panic information
     println!("\n=== PANIC OCCURRED ===");
-    
+
     // Print panic location if available
     if let Some(location) = info.location() {
-        println!("Panic occurred at {}:{}:{}", location.file(), location.line(), location.column());
+        println!(
+            "Panic occurred at {}:{}:{}",
+            location.file(),
+            location.line(),
+            location.column()
+        );
     } else {
         println!("Panic occurred at unknown location");
     }
-    
+
     // Print panic message if available
     let message = info.message();
     println!("Panic message: {}", message);
-    
+
     // Print memory information
     println!("\n=== MEMORY INFO ===");
     println!("Stack pointer: unavailable (assembly removed)");
-    
+
     // Print some general debug info
     println!("\n=== DEBUG INFO ===");
     println!("Target: unknown"); // The TARGET env variable is not set during runtime
-    println!("Profile: {}", if cfg!(debug_assertions) { "debug" } else { "release" });
-    
+    println!(
+        "Profile: {}",
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
+    );
+
     // Force a flush to ensure all output is printed
     println!("\n=== ENTERING PANIC LOOP ===");
-    
+
     // Custom panic handler loop - no automatic reset
     // The system will remain in this loop until manually reset
     loop {
@@ -73,8 +85,8 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 }
 
 use sh8601_rs::{
-    framebuffer_size, ColorMode, DisplaySize, ResetDriver, Sh8601Driver, Ws18AmoledDriver,
-    DMA_CHUNK_SIZE,
+    ColorMode, DMA_CHUNK_SIZE, DisplaySize, ResetDriver, Sh8601Driver, Ws18AmoledDriver,
+    framebuffer_size,
 };
 
 /// A wrapper around a boxed array that implements FrameBufferBackend.
@@ -120,7 +132,7 @@ const FB_SIZE: usize = framebuffer_size(DISPLAY_SIZE, ColorMode::Rgb888);
 type DisplayDriver = Sh8601Driver<Ws18AmoledDriver, ResetDriver>;
 
 // Conway's Game of Life grid configuration
-const GRID_WIDTH: usize = 52;  // 368 / 7 ≈ 52
+const GRID_WIDTH: usize = 52; // 368 / 7 ≈ 52
 const GRID_HEIGHT: usize = 64; // 448 / 7 ≈ 64
 
 fn update_game_of_life(
@@ -215,7 +227,7 @@ fn write_generation<D: DrawTarget<Color = Rgb888>>(
     Text::new(
         num_str.as_str(),
         Point::new(8, 400),
-        MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE),
+        MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE),
     )
     .draw(display)?;
     Ok(())
@@ -281,14 +293,14 @@ fn update_game_of_life_system(
     // Create a temporary copy of the grid to avoid borrowing issues
     let temp_grid = game.grid;
     update_game_of_life(&temp_grid, &mut game.next_grid);
-    
+
     // Swap the grids by copying instead of using mem::swap to avoid borrowing issues
     let temp = game.grid;
     game.grid = game.next_grid;
     game.next_grid = temp;
-    
+
     game.generation += 1;
-    
+
     if game.generation >= RESET_AFTER_GENERATIONS {
         randomize_grid(&mut rng_res.0, &mut game.grid);
         game.generation = 0;
@@ -302,55 +314,55 @@ fn render_system(
 ) {
     // Clear the framebuffer
     fb_res.frame_buf.clear(Rgb888::BLACK).unwrap();
-    
+
     // Draw the game grid
     draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
-    
+
     // Add centered text overlay
     let line1 = "Rust no_std ESP32-S3";
     let line2 = "Bevy ECS 0.16 no_std";
     let line3 = "AMOLED Display";
-    
-    // Calculate text positioning
-    let line1_width = line1.len() as i32 * 8;
-    let line2_width = line2.len() as i32 * 8;
-    let line3_width = line3.len() as i32 * 8;
-    
+
+    // Calculate text positioning - FONT_10X20 is 10 pixels wide
+    let line1_width = line1.len() as i32 * 10;
+    let line2_width = line2.len() as i32 * 10;
+    let line3_width = line3.len() as i32 * 10;
+
     let x1 = (LCD_H_RES as i32 - line1_width) / 2;
     let x2 = (LCD_H_RES as i32 - line2_width) / 2;
     let x3 = (LCD_H_RES as i32 - line3_width) / 2;
-    
-    let y_center = (LCD_V_RES as i32 - 42) / 2;
-    
+
+    let y_center = (LCD_V_RES as i32 - 60) / 2; // Updated for 20px font height
+
     Text::new(
         line1,
         Point::new(x1, y_center),
-        MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE),
+        MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE),
     )
     .draw(&mut fb_res.frame_buf)
     .unwrap();
-    
+
     Text::new(
         line2,
-        Point::new(x2, y_center + 14),
-        MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE),
+        Point::new(x2, y_center + 20),
+        MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE),
     )
     .draw(&mut fb_res.frame_buf)
     .unwrap();
-    
+
     Text::new(
         line3,
-        Point::new(x3, y_center + 28),
-        MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE),
+        Point::new(x3, y_center + 40),
+        MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE),
     )
     .draw(&mut fb_res.frame_buf)
     .unwrap();
-    
+
     // Draw the framebuffer content directly to the display
     // Clear the display first
     display_res.display.clear(Rgb888::BLACK).ok();
-    
+
     // Draw each pixel from the framebuffer as a 1x1 rectangle
     for (y, row) in fb_res.frame_buf.data.chunks_exact(LCD_H_RES).enumerate() {
         for (x, &pixel) in row.iter().enumerate() {
@@ -363,7 +375,7 @@ fn render_system(
             }
         }
     }
-    
+
     // Flush the display
     display_res.display.flush().ok();
 }
@@ -371,13 +383,13 @@ fn render_system(
 #[main]
 fn main() -> ! {
     println!("[MAIN] Starting main function");
-    
+
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     println!("[MAIN] Config created");
-    
+
     let peripherals = esp_hal::init(config);
     println!("[MAIN] Peripherals initialized");
-    
+
     println!("[MAIN] Starting up...");
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
     println!("[MAIN] PSRAM allocator initialized");
@@ -435,7 +447,7 @@ fn main() -> ! {
         DISPLAY_SIZE,
         delay,
     );
-    
+
     let display = match display_res {
         Ok(d) => {
             println!("Display initialized successfully.");
@@ -453,7 +465,7 @@ fn main() -> ! {
     // Initialize game resources
     let mut game = GameOfLifeResource::default();
     randomize_grid(&mut rng, &mut game.grid);
-    
+
     // Add a glider pattern
     let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
     for (x, y) in glider.iter() {
@@ -461,31 +473,30 @@ fn main() -> ! {
             game.grid[*y][*x] = 1;
         }
     }
-    
+
     // Create framebuffer resource
     let fb_res = FrameBufferResource::new();
-    
+
     // Initialize Bevy ECS World
     let mut world = World::default();
     world.insert_resource(game);
     world.insert_resource(RngResource(rng));
     world.insert_resource(fb_res);
-    
+
     // Insert display as NonSend resource
     world.insert_non_send_resource(DisplayResource { display });
-    
+
     // Create schedule and add systems
     let mut schedule = Schedule::default();
     schedule.add_systems(update_game_of_life_system);
     schedule.add_systems(render_system);
-    
+
     let loop_delay = Delay::new();
-    
+
     info!("Entering Bevy ECS main loop...");
-    
+
     loop {
         schedule.run(&mut world);
         loop_delay.delay_millis(50);
     }
 }
-

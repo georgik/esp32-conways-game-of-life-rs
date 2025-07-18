@@ -47,6 +47,19 @@ cd waveshare-esp32-s3-touch-lcd-1_28
 cargo run --release
 ```
 
+### Waveshare ESP32-S3-Touch-AMOLED 1.8
+
+![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch AMOLED with Bevy ECS](waveshare-esp32-s3-touch-amoled-1_8.jpg)
+
+[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waveshare ESP32-S3 Touch AMOLED 1.8 inch](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm) with DMA and framebuffer:
+
+The implementation is based on Rust no\_std and Bevy 0.16 no\_std, featuring a high-density 368×448 pixel AMOLED display with enhanced font visibility.
+
+```
+cd waveshare-esp32-s3-touch-amoled-1_8
+cargo run --release
+```
+
 ### M5Stack Atom-S3
 
 ![ESP32 Conways Game of Life in Rust - M5Stack Atom-S3 with Bevy ECS](m5stack-atom-s3.jpg)
