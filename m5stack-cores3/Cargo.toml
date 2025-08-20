@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 
 [dependencies]
-esp-hal = { version = "1.0.0-beta.0", features = ["esp32s3", "unstable"] }
+esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable"] }
 esp-backtrace = { version = "0.15.1", features = [
     "panic-handler",
     "println"
@@ -29,7 +29,7 @@ axp2101 = { git = "https://github.com/georgik/axp2101-rs.git", tag = "v0.2.0" }
 # GPIO Expander
 aw9523 = { git = "https://github.com/georgik/aw9523-rs.git", tag = "v0.2.0" }
 
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "301f618", default-features = false }
+bevy_ecs = { version = "0.16.1", default-features = false }
 
 
 [features]
