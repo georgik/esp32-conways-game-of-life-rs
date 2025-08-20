@@ -227,7 +227,7 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
         Point::new(x, y),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-        .draw(display)?;
+    .draw(display)?;
     Ok(())
 }
 
@@ -328,15 +328,15 @@ fn render_system(
         Point::new(x1, y),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-        .draw(&mut fb_res.frame_buf)
-        .unwrap();
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
     Text::new(
         line2,
         Point::new(x2, y + 14),
         MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
     )
-        .draw(&mut fb_res.frame_buf)
-        .unwrap();
+    .draw(&mut fb_res.frame_buf)
+    .unwrap();
 
     // Define the area covering the entire framebuffer.
     let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
@@ -366,12 +366,12 @@ fn main() -> ! {
             .with_frequency(Rate::from_mhz(80))
             .with_mode(esp_hal::spi::Mode::_0),
     )
-        .unwrap()
-        .with_sck(peripherals.GPIO10)
-        .with_mosi(peripherals.GPIO11)
-        .with_dma(peripherals.DMA_CH0)
-        // .with_miso(peripherals.GPIO14)
-        .with_buffers(dma_rx_buf, dma_tx_buf);
+    .unwrap()
+    .with_sck(peripherals.GPIO10)
+    .with_mosi(peripherals.GPIO11)
+    .with_dma(peripherals.DMA_CH0)
+    // .with_miso(peripherals.GPIO14)
+    .with_buffers(dma_rx_buf, dma_tx_buf);
     let cs_output = Output::new(peripherals.GPIO9, Level::High, OutputConfig::default());
     let spi_delay = Delay::new();
     let spi_device = ExclusiveDevice::new(spi, cs_output, spi_delay).unwrap();

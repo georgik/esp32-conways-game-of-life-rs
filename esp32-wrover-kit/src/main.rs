@@ -4,8 +4,8 @@
 extern crate alloc;
 use alloc::boxed::Box;
 
+use bevy_ecs::prelude::*;
 use core::fmt::Write;
-use embedded_hal::delay::DelayNs;
 use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
     pixelcolor::Rgb565,
@@ -15,24 +15,27 @@ use embedded_graphics::{
     Drawable,
 };
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_hal::delay::DelayNs;
+use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
-use esp_hal::{
-    gpio::{Level, Output, OutputConfig, DriveMode},
-    rng::Rng,
-    spi::master::{Spi, SpiDmaBus},
-    Blocking,
-    main,
-    time::Rate,
-};
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
-use embedded_hal_bus::spi::ExclusiveDevice;
+use esp_hal::{
+    gpio::{DriveMode, Level, Output, OutputConfig},
+    main,
+    rng::Rng,
+    spi::master::{Spi, SpiDmaBus},
+    time::Rate,
+    Blocking,
+};
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::{interface::SpiInterface, options::{ColorInversion, Orientation, ColorOrder}};
-use mipidsi::{models::ILI9341Rgb565, Builder};
-use bevy_ecs::prelude::*;
 use mipidsi::options::Rotation;
+use mipidsi::{
+    interface::SpiInterface,
+    options::{ColorInversion, ColorOrder, Orientation},
+};
+use mipidsi::{models::ILI9341Rgb565, Builder};
 // includes NonSend and NonSendMut
 
 #[panic_handler]
@@ -47,10 +50,10 @@ type MyDisplay = mipidsi::Display<
     SpiInterface<
         'static,
         ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
-        Output<'static>
+        Output<'static>,
     >,
     ILI9341Rgb565,
-    Output<'static>
+    Output<'static>,
 >;
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
@@ -97,7 +100,6 @@ impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
     }
 }
 
-
 // We want our pixels stored as Rgb565.
 type FbBuffer = HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
 // Define a type alias for the complete FrameBuf.
@@ -117,7 +119,6 @@ impl FrameBufferResource {
         Self { frame_buf }
     }
 }
-
 
 // --- Game of Life Definitions ---
 // Now each cell is a u8 (0 means dead; >0 indicates age)
@@ -144,7 +145,9 @@ fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
             let mut alive_neighbors = 0;
             for i in 0..3 {
                 for j in 0..3 {
-                    if i == 1 && j == 1 { continue; }
+                    if i == 1 && j == 1 {
+                        continue;
+                    }
                     let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
                     let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
                     if grid[ny][nx] > 0 {
@@ -182,7 +185,7 @@ fn age_to_color(age: u8) -> Rgb565 {
         let r = ((31 * a) + 5) / max_age as u32;
         let g = ((63 * a) + 5) / max_age as u32;
         let b = 31; // Keep blue channel constant
-        // Convert back to u8 and return the color.
+                    // Convert back to u8 and return the color.
         Rgb565::new(r as u8, g as u8, b)
     }
 }
@@ -360,11 +363,7 @@ fn main() -> ! {
 
     // Reset pin: OpenDrain required for ESP32-S3-BOX! Tricky setting.
     // For some Wrover-Kit boards the reset pin must be pulsed low.
-    let mut reset = Output::new(
-        peripherals.GPIO18,
-        Level::Low,
-        OutputConfig::default()
-    );
+    let mut reset = Output::new(peripherals.GPIO18, Level::Low, OutputConfig::default());
     // Pulse the reset pin: drive low for 100 ms then high.
     reset.set_low();
     Delay::new().delay_ms(100u32);
@@ -375,7 +374,6 @@ fn main() -> ! {
         .reset_pin(reset)
         .display_size(240, 320)
         .orientation(Orientation::new().rotate(Rotation::Deg90).flip_horizontal())
-
         .color_order(ColorOrder::Bgr)
         // .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)

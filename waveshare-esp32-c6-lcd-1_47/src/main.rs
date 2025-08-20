@@ -95,7 +95,6 @@ impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
     }
 }
 
-
 // We want our pixels stored as Rgb565.
 type FbBuffer = HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
 // Define a type alias for the complete FrameBuf.

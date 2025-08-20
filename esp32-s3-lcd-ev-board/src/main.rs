@@ -254,7 +254,6 @@ impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
     }
 }
 
-
 fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
@@ -463,7 +462,7 @@ fn main() -> ! {
             // extend total timings for larger porch intervals
             horizontal_total_width: 600, // allow long back/front porch
             horizontal_blank_front_porch: 80,
-            vertical_total_height: 600,  // allow longer vertical blank
+            vertical_total_height: 600, // allow longer vertical blank
             vertical_blank_front_porch: 80,
             // maintain sync widths
             hsync_width: 10,

@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 
 
 [dependencies]
-esp-hal = { version = "1.0.0-beta.0", features = ["esp32c6", "unstable"] }
+esp-hal = { version = "1.0.0-rc.0", features = ["esp32c6", "unstable"] }
 esp-backtrace = { version = "0.15.1", features = [
     "panic-handler",
     "println"
@@ -26,7 +26,7 @@ esp-bsp = "0.4.1"
 embedded-graphics-framebuf = "0.5.0"
 heapless = "0.8.0"
 embedded-hal-bus = "0.3.0"
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "06cb5c5", default-features = false }
+bevy_ecs = { version = "0.16.1", default-features = false }
 
 
 [features]
