@@ -3,6 +3,10 @@ edition = "2024"
 name    = "esp32-conways-game-of-life-rs"
 version = "0.7.0"
 
+
+# Empty workspace to avoid being part of parent workspace
+[workspace]
+
 [[bin]]
 name = "esp32-conways-game-of-life-rs"
 path = "./src/bin/main.rs"
@@ -16,7 +20,7 @@ log = "0.4.27"
 embedded-graphics = "0.8.1"
 embedded-graphics-framebuf = "0.5.0"
 heapless = "0.8.0"
-sh8601-rs = { version = "0.1.4", features = ["waveshare_18_amoled"] }
+sh8601-rs = { version = "0.1.6", features = ["waveshare_18_amoled"] }
 embedded-hal-bus = "0.3.0"
 bevy_ecs = { version = "0.16.1", default-features = false }
 
