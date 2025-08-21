@@ -36,7 +36,7 @@ use log::{error, info};
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    error!("Panic: {}", _info);
+    error!("Panic: {_info}");
     loop {}
 }
 
@@ -231,13 +231,13 @@ impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
 impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
     type Target = [C; N];
     fn deref(&self) -> &Self::Target {
-        &*self.0
+        &self.0
     }
 }
 
 impl<C: PixelColor, const N: usize> core::ops::DerefMut for HeapBuffer<C, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.0
+        &mut self.0
     }
 }
 
@@ -352,6 +352,7 @@ const LCD_BUFFER_SIZE: usize = 480 * 480;
 // Size of the entire frame in bytes (2 bytes per pixel)
 const FRAME_BYTES: usize = BUFFER_SIZE * 2;
 // Number of descriptors needed, each up to CHUNK_SIZE (4095)
+#[allow(clippy::manual_div_ceil)]
 const NUM_DMA_DESC: usize = (FRAME_BYTES + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
 /// Place the descriptor(s) in DMA-capable RAM.
@@ -438,6 +439,7 @@ fn main() -> ! {
             }
         }
     }
+    #[allow(clippy::drop_non_drop)]
     drop(vsync_must_be_high_during_setup);
 
     // Set up DMA channel for LCD
@@ -552,11 +554,11 @@ fn main() -> ! {
                 dpi = dpi2;
                 dma_tx = buf2;
                 if let Err(e) = res {
-                    error!("DMA error: {:?}", e);
+                    error!("DMA error: {e:?}");
                 }
             }
             Err((e, dpi2, buf2)) => {
-                error!("DMA send error: {:?}", e);
+                error!("DMA send error: {e:?}");
                 dpi = dpi2;
                 dma_tx = buf2;
             }

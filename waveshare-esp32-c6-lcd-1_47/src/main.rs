@@ -72,13 +72,13 @@ impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
 impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
     type Target = [C; N];
     fn deref(&self) -> &Self::Target {
-        &*self.0
+        &self.0
     }
 }
 
 impl<C: PixelColor, const N: usize> core::ops::DerefMut for HeapBuffer<C, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.0
+        &mut self.0
     }
 }
 
@@ -219,7 +219,7 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
     generation: usize,
 ) -> Result<(), D::Error> {
     let mut num_str = heapless::String::<20>::new();
-    write!(num_str, "{}", generation).unwrap();
+    write!(num_str, "{generation}").unwrap();
     Text::new(
         num_str.as_str(),
         Point::new(8, 13),
@@ -323,6 +323,7 @@ fn main() -> ! {
     init_logger_from_env();
 
     // --- DMA Buffers for SPI ---
+    #[allow(clippy::manual_div_ceil)]
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(8912);
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();

@@ -49,7 +49,7 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
     let mut num_str = String::<20>::new();
     // Write the generation number into the string
     // unwrap is safe here since we know the number is at most 20 characters
-    write!(num_str, "{}", generation).unwrap();
+    write!(num_str, "{generation}").unwrap();
     // Create the text drawable with the generation number
     Text::new(
         num_str.as_str(),
