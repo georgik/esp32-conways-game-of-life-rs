@@ -338,6 +338,36 @@ async fn update_dependencies(
     verbose: bool,
 ) -> Result<()> {
     println!("\n📦 Updating dependencies across all projects");
+
+    // Check if cargo-edit is installed
+    let cargo_edit_check = TokioCommand::new("cargo")
+        .arg("upgrade")
+        .arg("--version")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await;
+
+    if let Err(e) = cargo_edit_check {
+        println!("❌ Failed to check for cargo-edit: {}", e);
+        println!("\n⚠️  Required dependency missing: cargo-edit");
+        println!("The 'cargo upgrade' command is provided by the cargo-edit crate.");
+        println!("\n📥 Please install it with the following command:");
+        println!("   cargo install cargo-edit");
+        println!("\n💡 Then try running this command again.");
+        return Ok(());
+    } else if let Ok(output) = cargo_edit_check {
+        if !output.status.success() {
+            println!("❌ cargo-edit is not installed");
+            println!("\n⚠️  Required dependency missing: cargo-edit");
+            println!("The 'cargo upgrade' command is provided by the cargo-edit crate.");
+            println!("\n📥 Please install it with the following command:");
+            println!("   cargo install cargo-edit");
+            println!("\n💡 Then try running this command again.");
+            return Ok(());
+        }
+    }
+
     if dry_run {
         println!("🔍 Running in DRY-RUN mode - no changes will be made");
     }
