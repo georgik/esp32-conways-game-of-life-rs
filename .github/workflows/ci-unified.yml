@@ -78,14 +78,6 @@ jobs:
         run: |
           cargo build --manifest-path xtask/Cargo.toml
 
-      - name: List discovered projects
-        run: |
-          cargo xtask list
-
-      - name: Format all projects
-        run: |
-          cargo xtask format ${{ github.event.inputs.verbose == 'true' && '--verbose' || '' }}
-
       - name: Build all ESP32 projects
         run: |
           cargo xtask build \
