@@ -255,13 +255,13 @@ This board is no longer in production, yet it's still used by many developers.
 ![ESP32 Conways Game of Life in Rust - ESP-WROVER-KIT with Bevy ECS](docs/esp32-wrover-kit.jpg)
 
 The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
-It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
+It requires es-rs toolchain for ESP32-S3 version at [least 1.88](https://github.com/esp-rs/rust-build/releases/tag/v1.88.0.0), because of edition 2024.
 
 Installation of the toolchain:
 
 ```
 cargo install espup
-espup install --toolchain-version 1.85.0.0
+espup install --toolchain-version 1.88.0.0
 source ~/export-esp.sh
 ```
 
@@ -271,187 +271,6 @@ Build:
 cd esp32-wrover-kit
 cargo run --release
 ```
-
-## 🛠️ Installation & Setup
-
-1. **Clone the repository**:
-   ```bash
-   git clone <repository-url>
-   cd esp32-conways-game-of-life-rs
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   # Install cargo-edit for dependency updates
-   cargo install cargo-edit
-   
-   # Build the xtask tool
-   cargo build
-   ```
-
-3. **Set up ESP-IDF environment** (required for building):
-   ```bash
-   source ~/projects/esp-idf/export.sh
-   ```
-
-4. **Fix workspace issues** (one-time setup):
-   ```bash
-   cargo xtask fix-workspace
-   ```
-
-## 📋 Available Commands
-
-### List Projects
-```bash
-cargo xtask list
-```
-Shows all discovered ESP32 projects and their status.
-
-### Build All Projects  
-```bash
-# Build all projects (stops on first failure)
-cargo xtask build
-
-# Build all projects (continue even if some fail)
-cargo xtask build --keep-going
-
-# Build with verbose output
-cargo xtask build --verbose
-```
-
-### Update Dependencies
-```bash
-# Preview available updates
-cargo xtask update --dry-run
-
-# Update to compatible versions only
-cargo xtask update
-
-# Include potentially breaking updates
-cargo xtask update --incompatible
-
-# Preview breaking changes
-cargo xtask update --dry-run --incompatible
-```
-
-### Format Code
-```bash
-# Format all projects using cargo fmt
-cargo xtask format
-
-# Format with verbose output
-cargo xtask format --verbose
-```
-
-### Run All Tasks
-```bash
-# Run: format → update (compatible) → build
-cargo xtask all
-
-# Run all tasks, continue on failures
-cargo xtask all --keep-going
-```
-
-### Fix Workspace Issues
-```bash
-# Add empty [workspace] sections to prevent conflicts
-cargo xtask fix-workspace
-```
-
-## 🎯 Advantages Over Shell Scripts
-
-### ✅ **Cross-Platform Reliability**
-- **Pure Rust** - works on Windows, macOS, Linux
-- **No shell dependencies** - no bash/zsh compatibility issues
-- **Structured error handling** - clear error reporting
-
-### ✅ **Advanced Features**
-- **Parallel processing** - faster than sequential shell scripts
-- **Detailed reporting** - comprehensive summaries and warnings
-- **Dry-run mode** - preview changes before applying
-- **Selective execution** - continue on failures with `--keep-going`
-
-### ✅ **Maintainable Code**
-- **Type safety** - compile-time error checking  
-- **Structured CLI** - using `clap` for robust argument parsing
-- **Async support** - efficient I/O operations
-- **Easy extension** - add new commands easily
-
-## 📊 Example Output
-
-### Project Listing
-```
-📋 Discovered ESP32 Projects (12 total):
-┌─────┬──────────────────────────────────────────────┬────────────┐
-│ #   │ Project Name                                 │ Status     │
-├─────┼──────────────────────────────────────────────┼────────────┤
-│   1 │ esope-sld-c-w-s3                             │ ✅ Ready   │
-│   2 │ esp32-c3-lcdkit                              │ ✅ Ready   │
-│   3 │ esp32-c6-memory-lcd                          │ ✅ Ready   │
-└─────┴──────────────────────────────────────────────┴────────────┘
-
-📊 Summary: 12 ready for build, 0 missing Cargo.toml
-```
-
-### Build Summary
-```
-📊 Build Summary:
-✅ Successfully built: 11 projects
-❌ Failed to build: 1 projects
-⚠️  Total warnings: 3
-
-Projects with warnings:
-  • esp32-c6-memory-lcd (1 warnings)
-  • esp32-wrover-kit (2 warnings)
-```
-
-### Dependency Updates
-```
-📦 Processing: esp32-s3-box-3
-   name          old req compatible latest new req note        
-   esp-backtrace 0.16.0  0.16.0     0.17.0 0.16.0  incompatible
-   esp-println   0.14.0  0.14.0     0.15.0 0.14.0  incompatible
-   heapless      0.8.0   0.8.0      0.9.1  0.8.0   incompatible
-✅ Dependencies updated: esp32-s3-box-3
-```
-
-## 🔧 Development
-
-### Adding New Commands
-The tool is designed for easy extension. To add new commands:
-
-1. Add command to `Commands` enum in `xtask/src/main.rs`
-2. Implement the command handler function
-3. Add the match arm in `main()`
-
-### Project Patterns
-Projects are discovered using these patterns:
-- `esope*` - ESOPE boards
-- `esp32*` - ESP32 development boards  
-- `m5stack*` - M5Stack boards
-- `waveshare*` - Waveshare boards
-
-## 🚨 Requirements
-
-- **Rust toolchain** - latest stable
-- **ESP-IDF environment** - properly sourced for building
-- **cargo-edit** - for dependency updates (`cargo install cargo-edit`)
-
-## 💡 Tips
-
-1. **Always run `cargo xtask fix-workspace`** after cloning to resolve workspace conflicts
-2. **Use `--dry-run`** before applying dependency updates to preview changes
-3. **Use `--keep-going`** for builds to see all failures at once
-4. **Check warnings** in build output - they often indicate potential issues
-
-## 🎉 Migration from Shell Scripts
-
-This tool **replaces**:
-- ✅ `format_projects.sh` → `cargo xtask format`  
-- ✅ `test_builds.sh` → `cargo xtask build`
-- ✅ `update-deps/` → `cargo xtask update`
-
-**Benefits**: More reliable, faster, better error handling, cross-platform compatibility.
 
 ---
 
@@ -545,63 +364,6 @@ cargo xtask all --keep-going
 cargo xtask fix-workspace
 ```
 
-### 🎯 Advantages Over Shell Scripts
-
-#### ✅ **Cross-Platform Reliability**
-- **Pure Rust** - works on Windows, macOS, Linux
-- **No shell dependencies** - no bash/zsh compatibility issues
-- **Structured error handling** - clear error reporting
-
-#### ✅ **Advanced Features**
-- **Parallel processing** - faster than sequential shell scripts
-- **Detailed reporting** - comprehensive summaries and warnings
-- **Dry-run mode** - preview changes before applying
-- **Selective execution** - continue on failures with `--keep-going`
-
-#### ✅ **Maintainable Code**
-- **Type safety** - compile-time error checking  
-- **Structured CLI** - using `clap` for robust argument parsing
-- **Async support** - efficient I/O operations
-- **Easy extension** - add new commands easily
-
-### 📊 Example Output
-
-#### Project Listing
-```
-📋 Discovered ESP32 Projects (12 total):
-┌─────┬──────────────────────────────────────────────┬────────────┐
-│ #   │ Project Name                                 │ Status     │
-├─────┼──────────────────────────────────────────────┼────────────┤
-│   1 │ esope-sld-c-w-s3                             │ ✅ Ready │
-│   2 │ esp32-c3-lcdkit                              │ ✅ Ready │
-│   3 │ esp32-c6-memory-lcd                          │ ✅ Ready │
-└─────┴──────────────────────────────────────────────┴────────────┘
-
-📊 Summary: 12 ready for build, 0 missing Cargo.toml
-```
-
-#### Build Summary
-```
-📊 Build Summary:
-✅ Successfully built: 11 projects
-❌ Failed to build: 1 projects
-⚠️  Total warnings: 3
-
-Projects with warnings:
-  • esp32-c6-memory-lcd (1 warnings)
-  • esp32-wrover-kit (2 warnings)
-```
-
-#### Dependency Updates
-```
-📦 Processing: esp32-s3-box-3
-   name          old req compatible latest new req note        
-   esp-backtrace 0.16.0  0.16.0     0.17.0 0.16.0  incompatible
-   esp-println   0.14.0  0.14.0     0.15.0 0.14.0  incompatible
-   heapless      0.8.0   0.8.0      0.9.1  0.8.0   incompatible
-✅ Dependencies updated: esp32-s3-box-3
-```
-
 ### 🔧 Development
 
 #### Adding New Commands
@@ -611,29 +373,3 @@ The tool is designed for easy extension. To add new commands:
 2. Implement the command handler function
 3. Add the match arm in `main()`
 
-#### Project Patterns
-Projects are discovered using these patterns:
-- `esope*` - ESOPE boards
-- `esp32*` - ESP32 development boards  
-- `m5stack*` - M5Stack boards
-- `waveshare*` - Waveshare boards
-
-### 🚨 Requirements
-
-- **Rust toolchain** - latest stable
-- **ESP-IDF environment** - properly sourced for building
-- **cargo-edit** - for dependency updates (`cargo install cargo-edit`)
-
-### 💡 Tips
-
-1. **Always run `cargo xtask fix-workspace`** after cloning to resolve workspace conflicts
-2. **Use `--dry-run`** before applying dependency updates to preview changes
-3. **Use `--keep-going`** for builds to see all failures at once
-4. **Check warnings** in build output - they often indicate potential issues
-
-### 🎉 Migration from Shell Scripts
-
-This tool **replaces**:
-- ✅ `format_projects.sh` → `cargo xtask format`  
-- ✅ `test_builds.sh` → `cargo xtask build`
-- ✅ `update-deps/` → `cargo xtask update`
