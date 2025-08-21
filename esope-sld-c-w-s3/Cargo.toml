@@ -9,7 +9,7 @@ path = "./src/bin/main.rs"
 
 [dependencies]
 esp-alloc = "0.8.0"
-esp-hal = { version = "1.0.0-beta.1", features = ["esp32s3", "unstable", "psram"] }
+esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable", "psram"] }
 esp-println = { version = "0.14.0", features = ["esp32s3", "log-04"] }
 log = "0.4.27"
 

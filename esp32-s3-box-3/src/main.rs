@@ -32,10 +32,7 @@ use esp_hal::{
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
 use mipidsi::{Builder, models::ILI9486Rgb565};
-use mipidsi::{
-    interface::SpiInterface,
-    options::{ColorInversion, ColorOrder, Orientation},
-}; // includes NonSend and NonSendMut
+use mipidsi::{interface::SpiInterface, options::ColorOrder};
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {

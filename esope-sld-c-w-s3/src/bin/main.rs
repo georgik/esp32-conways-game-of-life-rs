@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 use core::fmt::Write;
-use embedded_graphics::mono_font::{ascii::FONT_8X13, MonoTextStyle};
+use embedded_graphics::mono_font::{MonoTextStyle, ascii::FONT_8X13};
 use embedded_graphics::text::Text;
 use heapless::String;
 
@@ -9,21 +9,21 @@ use esp_hal::dma::ExternalBurstConfig;
 
 use alloc::boxed::Box;
 use embedded_graphics::{
+    Drawable,
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
-    Drawable,
 };
-use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use embedded_graphics_framebuf::FrameBuf;
+use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use esp_hal::gpio::Level;
 use esp_hal::gpio::{Output, OutputConfig};
 use esp_hal::lcd_cam::{
-    lcd::{
-        dpi::{Config as DpiConfig, Dpi, Format, FrameTiming},
-        ClockMode, Phase, Polarity,
-    },
     LcdCam,
+    lcd::{
+        ClockMode, Phase, Polarity,
+        dpi::{Config as DpiConfig, Dpi, Format, FrameTiming},
+    },
 };
 use esp_hal::time::Rate;
 use esp_println::logger::init_logger_from_env;
@@ -35,13 +35,13 @@ use embassy_sync::signal::Signal;
 use embassy_time::Ticker;
 use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::I2c;
-use esp_hal::timer::{timg::TimerGroup, AnyTimer};
+use esp_hal::timer::{AnyTimer, timg::TimerGroup};
 use esp_hal_embassy::Executor;
 use log::{error, info};
 use static_cell::StaticCell;
 
 // DMA line‐buffer for parallel RGB (1 descriptor, up to 4095 bytes each)
-use esp_hal::dma::{DmaDescriptor, DmaTxBuf, CHUNK_SIZE};
+use esp_hal::dma::{CHUNK_SIZE, DmaDescriptor, DmaTxBuf};
 use esp_println::println;
 
 use esp_hal::rng::Rng;
@@ -172,7 +172,7 @@ fn age_to_color(age: u8) -> Rgb565 {
         let r = ((31 * a) + 5) / max_age as u32;
         let g = ((63 * a) + 5) / max_age as u32;
         let b = 31; // Keep blue channel constant
-                    // Convert back to u8 and return the color.
+        // Convert back to u8 and return the color.
         Rgb565::new(r as u8, g as u8, b)
     }
 }
@@ -413,8 +413,12 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Configure a single DMA buffer over the whole PSRAM region with 64‑byte bursts
     let dma_tx: DmaTxBuf = unsafe {
-        DmaTxBuf::new_with_config(&mut *core::ptr::addr_of_mut!(TX_DESCRIPTORS), psram_buf, ExternalBurstConfig::Size64)
-            .unwrap()
+        DmaTxBuf::new_with_config(
+            &mut *core::ptr::addr_of_mut!(TX_DESCRIPTORS),
+            psram_buf,
+            ExternalBurstConfig::Size64,
+        )
+        .unwrap()
     };
 
     // Signal to app core that PSRAM is ready
@@ -424,19 +428,20 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Spawn DMA display task on app core (core 1)
     let mut cpu_control = CpuControl::new(peripherals.CPU_CTRL);
-    let _app_core = cpu_control.start_app_core(unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) }, move || {
-        // Initialize Embassy time driver on app core
-        esp_hal_embassy::init([timer0, timer1]);
-        info!("[CORE 1] App core started, initializing DMA display task");
-        // Initialize and run Embassy executor on app core
-        static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-        let executor = EXECUTOR.init(Executor::new());
-        executor.run(|spawner| {
-            spawner
-                .spawn(dma_display_task(dpi, dma_tx))
-                .ok();
-        });
-    });
+    let _app_core = cpu_control.start_app_core(
+        unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) },
+        move || {
+            // Initialize Embassy time driver on app core
+            esp_hal_embassy::init([timer0, timer1]);
+            info!("[CORE 1] App core started, initializing DMA display task");
+            // Initialize and run Embassy executor on app core
+            static EXECUTOR: StaticCell<Executor> = StaticCell::new();
+            let executor = EXECUTOR.init(Executor::new());
+            executor.run(|spawner| {
+                spawner.spawn(dma_display_task(dpi, dma_tx)).ok();
+            });
+        },
+    );
 
     // Core 0: Run Conway task
     // Wait until PSRAM is ready
@@ -454,7 +459,9 @@ async fn main(_spawner: Spawner) -> ! {
     static MAIN_EXECUTOR: StaticCell<Executor> = StaticCell::new();
     let executor = MAIN_EXECUTOR.init(Executor::new());
     executor.run(|spawner| {
-        spawner.spawn(conway_task(psram_ptr, psram_len, rng_for_app)).ok();
+        spawner
+            .spawn(conway_task(psram_ptr, psram_len, rng_for_app))
+            .ok();
     });
 }
 

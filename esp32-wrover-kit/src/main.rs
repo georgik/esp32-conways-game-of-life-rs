@@ -21,7 +21,7 @@ use esp_hal::delay::Delay;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::{
-    gpio::{DriveMode, Level, Output, OutputConfig},
+    gpio::{Level, Output, OutputConfig},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
@@ -33,7 +33,7 @@ use log::info;
 use mipidsi::options::Rotation;
 use mipidsi::{
     interface::SpiInterface,
-    options::{ColorInversion, ColorOrder, Orientation},
+    options::{ColorOrder, Orientation},
 };
 use mipidsi::{models::ILI9341Rgb565, Builder};
 // includes NonSend and NonSendMut

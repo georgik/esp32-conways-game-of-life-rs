@@ -23,7 +23,7 @@ use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::{
     Blocking,
-    gpio::{Input, Level, Output, OutputConfig},
+    gpio::{Level, Output, OutputConfig},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
@@ -257,15 +257,15 @@ struct DisplayResource {
     display: MyDisplay,
 }
 
-struct ButtonResource {
-    button: Input<'static>,
-}
-
-/// Resource to track the previous state of the button (for edge detection).
-#[derive(Default, Resource)]
-struct ButtonState {
-    was_pressed: bool,
-}
+// struct ButtonResource {
+//     button: Input<'static>,
+// }
+//
+// /// Resource to track the previous state of the button (for edge detection).
+// #[derive(Default, Resource)]
+// struct ButtonState {
+//     was_pressed: bool,
+// }
 
 fn update_game_of_life_system(
     mut game: ResMut<GameOfLifeResource>,
@@ -279,25 +279,25 @@ fn update_game_of_life_system(
     }
 }
 
-/// System to check the button and reset the simulation when pressed.
-fn button_reset_system(
-    mut game: ResMut<GameOfLifeResource>,
-    mut rng_res: ResMut<RngResource>,
-    mut btn_state: ResMut<ButtonState>,
-    button_res: NonSend<ButtonResource>,
-) {
-    // Check if the button is pressed (active low)
-    if button_res.button.is_low() {
-        if !btn_state.was_pressed {
-            // Button press detected: reset simulation.
-            randomize_grid(&mut rng_res.0, &mut game.grid);
-            game.generation = 0;
-            btn_state.was_pressed = true;
-        }
-    } else {
-        btn_state.was_pressed = false;
-    }
-}
+// /// System to check the button and reset the simulation when pressed.
+// fn button_reset_system(
+//     mut game: ResMut<GameOfLifeResource>,
+//     mut rng_res: ResMut<RngResource>,
+//     mut btn_state: ResMut<ButtonState>,
+//     button_res: NonSend<ButtonResource>,
+// ) {
+//     // Check if the button is pressed (active low)
+//     if button_res.button.is_low() {
+//         if !btn_state.was_pressed {
+//             // Button press detected: reset simulation.
+//             randomize_grid(&mut rng_res.0, &mut game.grid);
+//             game.generation = 0;
+//             btn_state.was_pressed = true;
+//         }
+//     } else {
+//         btn_state.was_pressed = false;
+//     }
+// }
 
 /// Render the game state by drawing into the offscreen framebuffer and then flushing
 /// it to the display via DMA. After drawing the game grid and generation number,

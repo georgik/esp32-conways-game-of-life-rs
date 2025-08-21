@@ -23,7 +23,7 @@ use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
 use esp_hal::{
     Blocking,
-    gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull},
+    gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
@@ -34,8 +34,8 @@ use log::info;
 use mipidsi::{Builder, models::GC9A01};
 use mipidsi::{
     interface::SpiInterface,
-    options::{ColorInversion, ColorOrder, Orientation},
-}; // includes NonSend and NonSendMut
+    options::{ColorInversion, ColorOrder},
+};
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
