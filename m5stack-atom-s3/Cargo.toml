@@ -6,6 +6,10 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 
+
+# Empty workspace to avoid being part of parent workspace
+[workspace]
+
 [dependencies]
 esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable"] }
 esp-backtrace = { version = "0.15.1", features = [
@@ -13,7 +17,7 @@ esp-backtrace = { version = "0.15.1", features = [
     "println"
 ] }
 esp-println = { version = "0.13", features = [ "log" ] }
-log = { version = "0.4.26" }
+log = { version = "0.4.27" }
 
 esp-alloc = "0.7.0"
 embedded-graphics = "0.8.1"

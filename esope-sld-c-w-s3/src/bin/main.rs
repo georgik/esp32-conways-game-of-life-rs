@@ -49,7 +49,7 @@ use esp_hal::system::{CpuControl, Stack};
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
-    error!("Panic: {}", _info);
+    error!("Panic: {_info}");
     loop {}
 }
 
@@ -71,13 +71,13 @@ impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
 impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
     type Target = [C; N];
     fn deref(&self) -> &Self::Target {
-        &*self.0
+        &self.0
     }
 }
 
 impl<C: PixelColor, const N: usize> core::ops::DerefMut for HeapBuffer<C, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.0
+        &mut self.0
     }
 }
 
@@ -135,10 +135,13 @@ fn update_game_of_life(
                     }
                     let nx = x as i32 + dx;
                     let ny = y as i32 + dy;
-                    if nx >= 0 && nx < GRID_WIDTH as i32 && ny >= 0 && ny < GRID_HEIGHT as i32 {
-                        if current[ny as usize][nx as usize] > 0 {
-                            neighbors += 1;
-                        }
+                    if nx >= 0
+                        && nx < GRID_WIDTH as i32
+                        && ny >= 0
+                        && ny < GRID_HEIGHT as i32
+                        && current[ny as usize][nx as usize] > 0
+                    {
+                        neighbors += 1;
                     }
                 }
             }
@@ -208,7 +211,7 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
     generation: usize,
 ) -> Result<(), D::Error> {
     let mut num_str = String::<20>::new();
-    write!(num_str, "{}", generation).unwrap();
+    write!(num_str, "{generation}").unwrap();
     Text::new(
         num_str.as_str(),
         Point::new(8, 13),
@@ -252,14 +255,11 @@ async fn main(_spawner: Spawner) -> ! {
     eeprom.read_data(0x00, &mut eeid).unwrap();
     let display_width = u16::from_be_bytes([eeid[8], eeid[9]]) as usize;
     let display_height = u16::from_be_bytes([eeid[10], eeid[11]]) as usize;
-    info!(
-        "Display size from EEPROM: {}x{}",
-        display_width, display_height
-    );
+    info!("Display size from EEPROM: {display_width}x{display_height}");
 
     // Full-screen DMA constants
     const MAX_FRAME_BYTES: usize = 320 * 240 * 2;
-    const MAX_NUM_DMA_DESC: usize = (MAX_FRAME_BYTES + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    const MAX_NUM_DMA_DESC: usize = MAX_FRAME_BYTES.div_ceil(CHUNK_SIZE);
 
     #[unsafe(link_section = ".dma")]
     static mut TX_DESCRIPTORS: [DmaDescriptor; MAX_NUM_DMA_DESC] =
@@ -273,7 +273,7 @@ async fn main(_spawner: Spawner) -> ! {
         unsafe { core::slice::from_raw_parts_mut(fb_ptr as *mut u8, FRAME_BYTES) };
     // Verify PSRAM buffer allocation and alignment
     let buf_ptr = psram_buf.as_ptr() as usize;
-    info!("PSRAM buffer allocated at address: 0x{:08X}", buf_ptr);
+    info!("PSRAM buffer allocated at address: 0x{buf_ptr:08X}");
     info!("PSRAM buffer length: {}", psram_buf.len());
     info!("PSRAM buffer alignment modulo 32: {}", buf_ptr % 32);
     assert!(
@@ -322,14 +322,14 @@ async fn main(_spawner: Spawner) -> ! {
 
     // Log all infomration about display configuration
     info!("Display configuration:");
-    info!("  Resolution: {}x{}", h_res, v_res);
-    info!("  PCLK: {} Hz", pclk_hz);
-    info!("  HSYNC pulse: {} pixels", hsync_pulse);
-    info!("  HSYNC back porch: {} pixels", hsync_back);
-    info!("  HSYNC front porch: {} pixels", hsync_front);
-    info!("  VSYNC pulse: {} lines", vsync_pulse);
-    info!("  VSYNC back porch: {} lines", vsync_back);
-    info!("  VSYNC front porch: {} lines", vsync_front);
+    info!("  Resolution: {h_res}x{v_res}");
+    info!("  PCLK: {pclk_hz} Hz");
+    info!("  HSYNC pulse: {hsync_pulse} pixels");
+    info!("  HSYNC back porch: {hsync_back} pixels");
+    info!("  HSYNC front porch: {hsync_front} pixels");
+    info!("  VSYNC pulse: {vsync_pulse} lines");
+    info!("  VSYNC back porch: {vsync_back} lines");
+    info!("  VSYNC front porch: {vsync_front} lines");
 
     let dpi_config = DpiConfig::default()
         .with_clock_mode(ClockMode {
@@ -482,11 +482,11 @@ async fn dma_display_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: 
                 dpi = new_dpi;
                 dma_tx = new_dma_tx;
                 if let Err(e) = res {
-                    error!("[CORE 1] DMA transfer error: {:?}", e);
+                    error!("[CORE 1] DMA transfer error: {e:?}");
                 }
             }
             Err((e, new_dpi, new_dma_tx)) => {
-                error!("[CORE 1] DMA send error: {:?}", e);
+                error!("[CORE 1] DMA send error: {e:?}");
                 dpi = new_dpi;
                 dma_tx = new_dma_tx;
             }
@@ -501,14 +501,10 @@ async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
     let fb: &mut [Rgb565; LCD_BUFFER_SIZE] =
         unsafe { &mut *(psram_ptr as *mut [Rgb565; LCD_BUFFER_SIZE]) };
     let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
-    randomize_grid(&mut rng, &mut *game_grid);
+    randomize_grid(&mut rng, &mut game_grid);
     let mut next_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
 
-    let mut frame_buf = FrameBuf::new(
-        PSRAMFrameBuffer::new(fb),
-        LCD_H_RES_USIZE.into(),
-        LCD_V_RES_USIZE.into(),
-    );
+    let mut frame_buf = FrameBuf::new(PSRAMFrameBuffer::new(fb), LCD_H_RES_USIZE, LCD_V_RES_USIZE);
     let mut ticker = Ticker::every(embassy_time::Duration::from_millis(100));
     let mut generation_count: usize = 0;
     const RESET_AFTER_GENERATIONS: usize = 500;
@@ -519,13 +515,13 @@ async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
         //     Cpu::current() as usize
         // );
 
-        update_game_of_life(&*game_grid, &mut *next_grid);
+        update_game_of_life(&game_grid, &mut next_grid);
         core::mem::swap(&mut game_grid, &mut next_grid);
-        draw_grid(&mut frame_buf, &*game_grid).ok();
+        draw_grid(&mut frame_buf, &game_grid).ok();
         generation_count += 1;
         write_generation(&mut frame_buf, generation_count).ok();
         if generation_count >= RESET_AFTER_GENERATIONS {
-            randomize_grid(&mut rng, &mut *game_grid);
+            randomize_grid(&mut rng, &mut game_grid);
             generation_count = 0;
         }
         ticker.next().await;

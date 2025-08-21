@@ -1,0 +1,105 @@
+name: CI Unified - All ESP32 Projects
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "esp32-**/**"
+      - "esope-**/**" 
+      - "m5stack-**/**"
+      - "waveshare-**/**"
+      - "xtask/**"
+      - ".github/workflows/ci-unified.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "esp32-**/**"
+      - "esope-**/**"
+      - "m5stack-**/**" 
+      - "waveshare-**/**"
+      - "xtask/**"
+      - ".github/workflows/ci-unified.yml"
+  workflow_dispatch:
+    inputs:
+      verbose:
+        description: 'Enable verbose output'
+        required: false
+        default: 'false'
+        type: boolean
+      keep_going:
+        description: 'Continue building even if some projects fail'
+        required: false
+        default: 'true'
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  unified-build:
+    name: Build All ESP32 Projects
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install espup for ESP toolchain management
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall -y espflash espup
+          espup install --toolchain-version 1.88.0.0
+          source ~/export-esp.sh
+
+      - name: Setup Rust stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          targets: |
+            riscv32imac-unknown-none-elf
+            riscv32imc-unknown-none-elf
+
+      - name: Setup ESP Xtensa toolchain
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
+          version: "1.88.0"
+
+      - name: Verify toolchain setup
+        run: |
+          rustup show
+          rustup toolchain list
+
+      - name: Build xtask maintenance tool
+        run: |
+          cargo build --manifest-path xtask/Cargo.toml
+
+      - name: Build all ESP32 projects
+        run: |
+          cargo xtask build \
+            ${{ github.event.inputs.keep_going == 'true' && '--keep-going' || '' }} \
+            ${{ github.event.inputs.verbose == 'true' && '--verbose' || '' }}
+
+      - name: Run clippy on all projects
+        run: |
+          cargo xtask clippy ${{ github.event.inputs.verbose == 'true' && '--verbose' || '' }}
+
+      - name: Collect build artifacts
+        run: |
+          mkdir -p artifacts
+          find . -name "*.bin" -path "*/target/*/release/*" -exec cp {} artifacts/ \; || true
+          find . -name "bootloader.bin" -path "*/target/*" -exec cp {} artifacts/ \; || true
+          find . -name "partition-table.bin" -path "*/target/*" -exec cp {} artifacts/ \; || true
+          ls -la artifacts/ || echo "No artifacts found"
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-build-artifacts
+          path: artifacts/
+          retention-days: 30

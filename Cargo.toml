@@ -1,0 +1,13 @@
+# This is a workspace root for the xtask runner only
+[workspace]
+members = [
+    "xtask",
+]
+exclude = [
+    "esope-*",
+    "esp32-*", 
+    "m5stack-*",
+    "waveshare-*",
+    "update-deps",
+]
+resolver = "2"

@@ -18,6 +18,7 @@ use embedded_graphics_framebuf::FrameBuf;
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
 use heapless::String;
 
+use esp_hal::Blocking;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
@@ -101,13 +102,13 @@ impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
 impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
     type Target = [C; N];
     fn deref(&self) -> &Self::Target {
-        &*self.0
+        &self.0
     }
 }
 
 impl<C: PixelColor, const N: usize> core::ops::DerefMut for HeapBuffer<C, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut *self.0
+        &mut self.0
     }
 }
 
@@ -129,7 +130,7 @@ const DISPLAY_SIZE: DisplaySize = DisplaySize::new(368, 448);
 const FB_SIZE: usize = framebuffer_size(DISPLAY_SIZE, ColorMode::Rgb888);
 
 // Type alias for the display driver
-type DisplayDriver = Sh8601Driver<Ws18AmoledDriver, ResetDriver>;
+type DisplayDriver = Sh8601Driver<Ws18AmoledDriver, ResetDriver<I2c<'static, Blocking>>>;
 
 // Conway's Game of Life grid configuration
 const GRID_WIDTH: usize = 52; // 368 / 7 ≈ 52
@@ -149,10 +150,13 @@ fn update_game_of_life(
                     }
                     let nx = x as i32 + dx;
                     let ny = y as i32 + dy;
-                    if nx >= 0 && nx < GRID_WIDTH as i32 && ny >= 0 && ny < GRID_HEIGHT as i32 {
-                        if current[ny as usize][nx as usize] > 0 {
-                            neighbors += 1;
-                        }
+                    if nx >= 0
+                        && nx < GRID_WIDTH as i32
+                        && ny >= 0
+                        && ny < GRID_HEIGHT as i32
+                        && current[ny as usize][nx as usize] > 0
+                    {
+                        neighbors += 1;
                     }
                 }
             }
@@ -223,7 +227,7 @@ fn write_generation<D: DrawTarget<Color = Rgb888>>(
     generation: usize,
 ) -> Result<(), D::Error> {
     let mut num_str = String::<20>::new();
-    write!(num_str, "Gen: {}", generation).unwrap();
+    write!(num_str, "Gen: {generation}").unwrap();
     Text::new(
         num_str.as_str(),
         Point::new(8, 400),
@@ -402,6 +406,7 @@ fn main() -> ! {
     info!("Initializing display...");
 
     // --- DMA Buffers for SPI ---
+    #[allow(clippy::manual_div_ceil)]
     let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(DMA_CHUNK_SIZE);
     let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
     let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
@@ -433,7 +438,7 @@ fn main() -> ! {
     .with_scl(peripherals.GPIO14);
 
     // Initialize I2C GPIO Reset Pin for the WaveShare 1.8" AMOLED display
-    let reset = ResetDriver::new(i2c);
+    let reset = ResetDriver::<I2c<'_, Blocking>>::new(i2c);
 
     // Initialize display driver for the Waveshare 1.8" AMOLED display
     let ws_driver = Ws18AmoledDriver::new(lcd_spi);
@@ -455,7 +460,7 @@ fn main() -> ! {
         }
         Err(e) => {
             println!("Error initializing display: {:?}", e);
-            loop {}
+            panic!("Failed to initialize display");
         }
     };
 
