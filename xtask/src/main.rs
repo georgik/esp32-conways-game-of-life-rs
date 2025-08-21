@@ -42,6 +42,12 @@ enum Commands {
         #[arg(long, short)]
         verbose: bool,
     },
+    /// Run clippy on all projects
+    Clippy {
+        /// Show verbose output
+        #[arg(long, short)]
+        verbose: bool,
+    },
     /// Run all maintenance tasks: format, update (compatible only), and build
     All {
         /// Continue with other tasks even if one fails
@@ -131,6 +137,7 @@ async fn main() -> Result<()> {
             verbose,
         } => update_dependencies(&projects, dry_run, incompatible, verbose).await,
         Commands::Format { verbose } => format_all_projects(&projects, verbose).await,
+        Commands::Clippy { verbose } => clippy_all_projects(&projects, verbose).await,
         Commands::All {
             keep_going,
             verbose,
@@ -237,8 +244,13 @@ async fn build_all_projects(
             }
         } else {
             println!("❌ Build failed: {}", project.name);
-            if verbose || !keep_going {
-                println!("   Error: {}", result.message);
+            // Always show error details for failures, regardless of verbose flag
+            println!("   Error details:");
+            for line in result.message.lines().take(20) {
+                println!("   {}", line);
+            }
+            if result.message.lines().count() > 20 {
+                println!("   ... (truncated, use --verbose for full output)");
             }
             if !keep_going {
                 return Err(anyhow::anyhow!("Build failed for {}", project.name));
@@ -513,6 +525,122 @@ async fn format_project(project: &ProjectInfo, verbose: bool) -> Result<TaskResu
             stderr.to_string()
         },
         warnings: Vec::new(),
+    })
+}
+
+async fn clippy_all_projects(projects: &[ProjectInfo], verbose: bool) -> Result<()> {
+    println!("\n🔍 Running clippy on all ESP32 projects (--release mode)");
+    println!("════════════════════════════════════════════════════");
+
+    let mut summary = TaskSummary::new();
+
+    for project in projects.iter().filter(|p| p.has_cargo_toml) {
+        println!("\n🔍 Clippy: {}", project.name);
+
+        let result = clippy_project(project, verbose).await?;
+
+        if result.success {
+            println!("✅ Clippy passed: {}", project.name);
+            if !result.warnings.is_empty() {
+                println!("⚠️  {} clippy warnings found:", result.warnings.len());
+                for warning in &result.warnings[..std::cmp::min(3, result.warnings.len())] {
+                    println!("   {}", warning);
+                }
+                if result.warnings.len() > 3 {
+                    println!("   ... and {} more warnings", result.warnings.len() - 3);
+                }
+            }
+        } else {
+            println!("❌ Clippy failed: {}", project.name);
+            // Always show error details for failures, regardless of verbose flag
+            println!("   Error details:");
+            for line in result.message.lines().take(20) {
+                println!("   {}", line);
+            }
+            if result.message.lines().count() > 20 {
+                println!("   ... (truncated, use --verbose for full output)");
+            }
+        }
+
+        summary.add_result(&result);
+    }
+
+    println!("\n═══════════════════════════════════════");
+    println!("📊 Clippy Summary:");
+    println!("✅ Clippy passed: {} projects", summary.success);
+    if summary.failed > 0 {
+        println!("❌ Clippy failed: {} projects", summary.failed);
+    }
+    if summary.warnings > 0 {
+        println!("⚠️  Total clippy warnings: {}", summary.warnings);
+    }
+
+    Ok(())
+}
+
+async fn clippy_project(project: &ProjectInfo, verbose: bool) -> Result<TaskResult> {
+    // Read the rust-toolchain.toml to determine which toolchain to use
+    let toolchain_path = project.path.join("rust-toolchain.toml");
+    let toolchain = if toolchain_path.exists() {
+        let content =
+            fs::read_to_string(&toolchain_path).context("Failed to read rust-toolchain.toml")?;
+
+        // Parse the toolchain channel from TOML
+        if content.contains("channel = \"esp\"") {
+            "esp"
+        } else if content.contains("channel = \"stable\"") {
+            "stable"
+        } else {
+            "stable" // fallback
+        }
+    } else {
+        "stable" // fallback if no toolchain file
+    };
+
+    let output = TokioCommand::new("rustup")
+        .arg("run")
+        .arg(toolchain)
+        .arg("cargo")
+        .arg("clippy")
+        .arg("--release")
+        .arg("--all-features")
+        .arg("--workspace")
+        .arg("--")
+        .arg("-D")
+        .arg("warnings")
+        .current_dir(&project.path)
+        .output()
+        .await
+        .context("Failed to run cargo clippy")?;
+
+    let success = output.status.success();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let mut warnings = Vec::new();
+    let combined_output = format!("{}{}", stdout, stderr);
+
+    // Extract warnings from output
+    for line in combined_output.lines() {
+        if verbose {
+            println!("   {}", line);
+        }
+        if line.contains("warning:") || line.contains("help:") {
+            warnings.push(line.to_string());
+        }
+    }
+
+    let message = if success {
+        "Clippy passed".to_string()
+    } else {
+        format!("{}{}", stdout, stderr)
+    };
+
+    Ok(TaskResult {
+        project: project.name.clone(),
+        success,
+        message,
+        warnings,
     })
 }
 
