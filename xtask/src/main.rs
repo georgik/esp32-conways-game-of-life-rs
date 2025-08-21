@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::fs;
 use tokio::process::Command as TokioCommand;
 
 #[derive(Parser)]
@@ -82,9 +82,14 @@ struct TaskSummary {
 
 impl TaskSummary {
     fn new() -> Self {
-        Self { total: 0, success: 0, failed: 0, warnings: 0 }
+        Self {
+            total: 0,
+            success: 0,
+            failed: 0,
+            warnings: 0,
+        }
     }
-    
+
     fn add_result(&mut self, result: &TaskResult) {
         self.total += 1;
         if result.success {
@@ -99,68 +104,69 @@ impl TaskSummary {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    
+
     // Print banner
     println!("🚀 ESP32 Embedded Projects Maintenance Tool");
     println!("===========================================");
-    
+
     // Discover projects
     let projects = discover_projects().await?;
     if projects.is_empty() {
-        println!("⚠️  No ESP32 projects found matching patterns: {:?}", PROJECT_PATTERNS);
+        println!(
+            "⚠️  No ESP32 projects found matching patterns: {:?}",
+            PROJECT_PATTERNS
+        );
         return Ok(());
     }
-    
+
     match cli.command {
-        Commands::List => {
-            list_projects(&projects).await
-        }
-        Commands::Build { keep_going, verbose } => {
-            build_all_projects(&projects, keep_going, verbose).await
-        }
-        Commands::Update { dry_run, incompatible, verbose } => {
-            update_dependencies(&projects, dry_run, incompatible, verbose).await
-        }
-        Commands::Format { verbose } => {
-            format_all_projects(&projects, verbose).await
-        }
-        Commands::All { keep_going, verbose } => {
-            run_all_tasks(&projects, keep_going, verbose).await
-        }
-        Commands::FixWorkspace => {
-            fix_workspace_issues(&projects).await
-        }
+        Commands::List => list_projects(&projects).await,
+        Commands::Build {
+            keep_going,
+            verbose,
+        } => build_all_projects(&projects, keep_going, verbose).await,
+        Commands::Update {
+            dry_run,
+            incompatible,
+            verbose,
+        } => update_dependencies(&projects, dry_run, incompatible, verbose).await,
+        Commands::Format { verbose } => format_all_projects(&projects, verbose).await,
+        Commands::All {
+            keep_going,
+            verbose,
+        } => run_all_tasks(&projects, keep_going, verbose).await,
+        Commands::FixWorkspace => fix_workspace_issues(&projects).await,
     }
 }
 
 async fn discover_projects() -> Result<Vec<ProjectInfo>> {
     let current_dir = std::env::current_dir()?;
     let mut projects = Vec::new();
-    
+
     // Read directory entries
-    let mut entries = fs::read_dir(&current_dir)
-        .context("Failed to read current directory")?;
-    
+    let mut entries = fs::read_dir(&current_dir).context("Failed to read current directory")?;
+
     while let Some(entry) = entries.next().transpose()? {
         let path = entry.path();
         if !path.is_dir() {
             continue;
         }
-        
-        let dir_name = path.file_name()
+
+        let dir_name = path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or_default();
-        
+
         // Check if directory matches any of our patterns
         let matches_pattern = PROJECT_PATTERNS.iter().any(|pattern| {
             let pattern = pattern.trim_end_matches('*');
             dir_name.starts_with(pattern)
         });
-        
+
         if matches_pattern {
             let cargo_toml = path.join("Cargo.toml");
             let has_cargo_toml = cargo_toml.exists();
-            
+
             projects.push(ProjectInfo {
                 name: dir_name.to_string(),
                 path,
@@ -168,10 +174,10 @@ async fn discover_projects() -> Result<Vec<ProjectInfo>> {
             });
         }
     }
-    
+
     // Sort projects by name for consistent output
     projects.sort_by(|a, b| a.name.cmp(&b.name));
-    
+
     Ok(projects)
 }
 
@@ -180,33 +186,44 @@ async fn list_projects(projects: &[ProjectInfo]) -> Result<()> {
     println!("┌─────┬──────────────────────────────────────────────┬────────────┐");
     println!("│ #   │ Project Name                                 │ Status     │");
     println!("├─────┼──────────────────────────────────────────────┼────────────┤");
-    
+
     for (i, project) in projects.iter().enumerate() {
-        let status = if project.has_cargo_toml { "✅ Ready" } else { "❌ No Cargo.toml" };
+        let status = if project.has_cargo_toml {
+            "✅ Ready"
+        } else {
+            "❌ No Cargo.toml"
+        };
         println!("│ {:3} │ {:<44} │ {} │", i + 1, project.name, status);
     }
-    
+
     println!("└─────┴──────────────────────────────────────────────┴────────────┘");
-    
+
     let ready_count = projects.iter().filter(|p| p.has_cargo_toml).count();
-    println!("\n📊 Summary: {} ready for build, {} missing Cargo.toml", 
-             ready_count, projects.len() - ready_count);
-    
+    println!(
+        "\n📊 Summary: {} ready for build, {} missing Cargo.toml",
+        ready_count,
+        projects.len() - ready_count
+    );
+
     Ok(())
 }
 
-async fn build_all_projects(projects: &[ProjectInfo], keep_going: bool, verbose: bool) -> Result<()> {
+async fn build_all_projects(
+    projects: &[ProjectInfo],
+    keep_going: bool,
+    verbose: bool,
+) -> Result<()> {
     println!("\n🔨 Building all ESP32 projects with --release profile");
     println!("════════════════════════════════════════════════════");
-    
+
     let mut summary = TaskSummary::new();
     let mut results = Vec::new();
-    
+
     for project in projects.iter().filter(|p| p.has_cargo_toml) {
         println!("\n🔨 Building: {}", project.name);
-        
+
         let result = build_project(project, verbose).await?;
-        
+
         if result.success {
             println!("✅ Build successful: {}", project.name);
             if !result.warnings.is_empty() {
@@ -227,36 +244,57 @@ async fn build_all_projects(projects: &[ProjectInfo], keep_going: bool, verbose:
                 return Err(anyhow::anyhow!("Build failed for {}", project.name));
             }
         }
-        
+
         summary.add_result(&result);
         results.push(result);
     }
-    
+
     print_build_summary(&summary, &results).await;
-    
+
     if summary.failed > 0 && !keep_going {
         std::process::exit(1);
     }
-    
+
     Ok(())
 }
 
 async fn build_project(project: &ProjectInfo, verbose: bool) -> Result<TaskResult> {
-    let output = TokioCommand::new("cargo")
+    // Read the rust-toolchain.toml to determine which toolchain to use
+    let toolchain_path = project.path.join("rust-toolchain.toml");
+    let toolchain = if toolchain_path.exists() {
+        let content =
+            fs::read_to_string(&toolchain_path).context("Failed to read rust-toolchain.toml")?;
+
+        // Parse the toolchain channel from TOML
+        if content.contains("channel = \"esp\"") {
+            "esp"
+        } else if content.contains("channel = \"stable\"") {
+            "stable"
+        } else {
+            "stable" // fallback
+        }
+    } else {
+        "stable" // fallback if no toolchain file
+    };
+
+    let output = TokioCommand::new("rustup")
+        .arg("run")
+        .arg(toolchain)
+        .arg("cargo")
         .arg("build")
         .arg("--release")
         .current_dir(&project.path)
         .output()
         .await
         .context("Failed to run cargo build")?;
-    
+
     let success = output.status.success();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     let mut warnings = Vec::new();
     let combined_output = format!("{}{}", stdout, stderr);
-    
+
     // Extract warnings from output
     for line in combined_output.lines() {
         if verbose {
@@ -266,13 +304,13 @@ async fn build_project(project: &ProjectInfo, verbose: bool) -> Result<TaskResul
             warnings.push(line.to_string());
         }
     }
-    
+
     let message = if success {
         "Built successfully".to_string()
     } else {
         format!("{}{}", stdout, stderr)
     };
-    
+
     Ok(TaskResult {
         project: project.name.clone(),
         success,
@@ -281,7 +319,12 @@ async fn build_project(project: &ProjectInfo, verbose: bool) -> Result<TaskResul
     })
 }
 
-async fn update_dependencies(projects: &[ProjectInfo], dry_run: bool, incompatible: bool, verbose: bool) -> Result<()> {
+async fn update_dependencies(
+    projects: &[ProjectInfo],
+    dry_run: bool,
+    incompatible: bool,
+    verbose: bool,
+) -> Result<()> {
     println!("\n📦 Updating dependencies across all projects");
     if dry_run {
         println!("🔍 Running in DRY-RUN mode - no changes will be made");
@@ -290,14 +333,14 @@ async fn update_dependencies(projects: &[ProjectInfo], dry_run: bool, incompatib
         println!("⚠️  Including incompatible updates (potentially breaking)");
     }
     println!("═════════════════════════════════════════════════");
-    
+
     let mut summary = TaskSummary::new();
-    
+
     for project in projects.iter().filter(|p| p.has_cargo_toml) {
         println!("\n📦 Processing: {}", project.name);
-        
+
         let result = update_project_deps(project, dry_run, incompatible, verbose).await?;
-        
+
         if result.success {
             println!("✅ Dependencies updated: {}", project.name);
         } else {
@@ -306,17 +349,17 @@ async fn update_dependencies(projects: &[ProjectInfo], dry_run: bool, incompatib
                 println!("   Error: {}", result.message);
             }
         }
-        
+
         summary.add_result(&result);
     }
-    
+
     println!("\n═════════════════════════════════════════════════");
     println!("📊 Update Summary:");
     println!("✅ Successfully updated: {} projects", summary.success);
     if summary.failed > 0 {
         println!("❌ Failed: {} projects", summary.failed);
     }
-    
+
     if summary.success > 0 {
         println!("\n💡 Next Steps:");
         if !dry_run {
@@ -329,17 +372,22 @@ async fn update_dependencies(projects: &[ProjectInfo], dry_run: bool, incompatib
             println!("3. Consider --incompatible for major version updates");
         }
     }
-    
+
     Ok(())
 }
 
-async fn update_project_deps(project: &ProjectInfo, dry_run: bool, incompatible: bool, verbose: bool) -> Result<TaskResult> {
+async fn update_project_deps(
+    project: &ProjectInfo,
+    dry_run: bool,
+    incompatible: bool,
+    verbose: bool,
+) -> Result<TaskResult> {
     let mut cmd = TokioCommand::new("cargo");
     cmd.arg("upgrade")
         .current_dir(&project.path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    
+
     if dry_run {
         cmd.arg("--dry-run");
     }
@@ -349,33 +397,36 @@ async fn update_project_deps(project: &ProjectInfo, dry_run: bool, incompatible:
     if verbose {
         cmd.arg("--verbose");
     }
-    
-    let output = cmd.output().await
-        .context("Failed to run cargo upgrade")?;
-    
+
+    let output = cmd.output().await.context("Failed to run cargo upgrade")?;
+
     let success = output.status.success();
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     // Extract useful information from output
     let mut message_lines = Vec::new();
     for line in stdout.lines().chain(stderr.lines()) {
-        if line.contains("Upgrading") || line.contains("Updated") || 
-           line.contains("incompatible") || line.contains("latest") ||
-           line.trim().starts_with("name") || line.contains("->") {
+        if line.contains("Upgrading")
+            || line.contains("Updated")
+            || line.contains("incompatible")
+            || line.contains("latest")
+            || line.trim().starts_with("name")
+            || line.contains("->")
+        {
             message_lines.push(line.to_string());
             if verbose {
                 println!("   {}", line);
             }
         }
     }
-    
+
     let message = if success {
         "Dependencies processed successfully".to_string()
     } else {
         stderr.to_string()
     };
-    
+
     Ok(TaskResult {
         project: project.name.clone(),
         success,
@@ -387,14 +438,14 @@ async fn update_project_deps(project: &ProjectInfo, dry_run: bool, incompatible:
 async fn format_all_projects(projects: &[ProjectInfo], verbose: bool) -> Result<()> {
     println!("\n🎨 Formatting all ESP32 projects");
     println!("═══════════════════════════════");
-    
+
     let mut summary = TaskSummary::new();
-    
+
     for project in projects.iter().filter(|p| p.has_cargo_toml) {
         println!("\n🎨 Formatting: {}", project.name);
-        
+
         let result = format_project(project, verbose).await?;
-        
+
         if result.success {
             println!("✅ Formatted successfully: {}", project.name);
         } else {
@@ -403,39 +454,64 @@ async fn format_all_projects(projects: &[ProjectInfo], verbose: bool) -> Result<
                 println!("   Error: {}", result.message);
             }
         }
-        
+
         summary.add_result(&result);
     }
-    
+
     println!("\n═══════════════════════════════");
     println!("📊 Format Summary:");
     println!("✅ Successfully formatted: {} projects", summary.success);
     if summary.failed > 0 {
         println!("❌ Failed: {} projects", summary.failed);
     }
-    
+
     Ok(())
 }
 
 async fn format_project(project: &ProjectInfo, verbose: bool) -> Result<TaskResult> {
-    let output = TokioCommand::new("cargo")
+    // Read the rust-toolchain.toml to determine which toolchain to use
+    let toolchain_path = project.path.join("rust-toolchain.toml");
+    let toolchain = if toolchain_path.exists() {
+        let content =
+            fs::read_to_string(&toolchain_path).context("Failed to read rust-toolchain.toml")?;
+
+        // Parse the toolchain channel from TOML
+        if content.contains("channel = \"esp\"") {
+            "esp"
+        } else if content.contains("channel = \"stable\"") {
+            "stable"
+        } else {
+            "stable" // fallback
+        }
+    } else {
+        "stable" // fallback if no toolchain file
+    };
+
+    let output = TokioCommand::new("rustup")
+        .arg("run")
+        .arg(toolchain)
+        .arg("cargo")
         .arg("fmt")
         .current_dir(&project.path)
         .output()
         .await
         .context("Failed to run cargo fmt")?;
-    
+
     let success = output.status.success();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     if verbose && !stderr.is_empty() {
         println!("   {}", stderr);
     }
-    
+
     Ok(TaskResult {
         project: project.name.clone(),
         success,
-        message: if success { "Formatted".to_string() } else { stderr.to_string() },
+        message: if success {
+            "Formatted".to_string()
+        } else {
+            stderr.to_string()
+        },
         warnings: Vec::new(),
     })
 }
@@ -444,19 +520,19 @@ async fn run_all_tasks(projects: &[ProjectInfo], keep_going: bool, verbose: bool
     println!("\n🚀 Running ALL maintenance tasks");
     println!("═══════════════════════════════");
     println!("Tasks: Format → Update (compatible) → Build");
-    
+
     // Step 1: Format
     println!("\n📝 Step 1/3: Formatting code...");
     format_all_projects(projects, verbose).await?;
-    
+
     // Step 2: Update compatible dependencies
     println!("\n📦 Step 2/3: Updating compatible dependencies...");
     update_dependencies(projects, false, false, verbose).await?;
-    
+
     // Step 3: Build all
     println!("\n🔨 Step 3/3: Building all projects...");
     build_all_projects(projects, keep_going, verbose).await?;
-    
+
     println!("\n🎉 All maintenance tasks completed!");
     Ok(())
 }
@@ -476,10 +552,14 @@ async fn print_build_summary(summary: &TaskSummary, results: &[TaskResult]) {
         println!("⚠️  Total warnings: {}", summary.warnings);
         println!("\nProjects with warnings:");
         for result in results.iter().filter(|r| !r.warnings.is_empty()) {
-            println!("  • {} ({} warnings)", result.project, result.warnings.len());
+            println!(
+                "  • {} ({} warnings)",
+                result.project,
+                result.warnings.len()
+            );
         }
     }
-    
+
     if summary.failed == 0 && summary.warnings == 0 {
         println!("🎉 All projects built successfully with no warnings!");
     } else if summary.failed == 0 {
@@ -490,15 +570,15 @@ async fn print_build_summary(summary: &TaskSummary, results: &[TaskResult]) {
 async fn fix_workspace_issues(projects: &[ProjectInfo]) -> Result<()> {
     println!("\n🔧 Fixing workspace issues in all ESP32 projects");
     println!("═══════════════════════════════════════════════");
-    
+
     let mut fixed_count = 0;
     let mut skipped_count = 0;
-    
+
     for project in projects.iter().filter(|p| p.has_cargo_toml) {
         let cargo_toml_path = project.path.join("Cargo.toml");
-        
+
         println!("\n🔧 Processing: {}", project.name);
-        
+
         // Read current Cargo.toml
         let content = match fs::read_to_string(&cargo_toml_path) {
             Ok(content) => content,
@@ -507,39 +587,42 @@ async fn fix_workspace_issues(projects: &[ProjectInfo]) -> Result<()> {
                 continue;
             }
         };
-        
+
         // Check if it already has a [workspace] section
         if content.contains("[workspace]") {
             println!("⏭️  Already has [workspace] section, skipping");
             skipped_count += 1;
             continue;
         }
-        
+
         // Find the [package] section and add [workspace] after it
         let lines: Vec<&str> = content.lines().collect();
         let mut new_lines = Vec::new();
         let mut added_workspace = false;
-        
+
         for line in lines {
             new_lines.push(line.to_string());
-            
+
             // After the [package] section, add empty [workspace]
             if !added_workspace && line.starts_with("[package]") {
                 // Find the end of the [package] section
                 continue;
             }
-            
+
             // Look for the first section after [package] or dependencies
             if !added_workspace && line.starts_with("[") && !line.starts_with("[package]") {
                 // Insert empty workspace before this section
                 new_lines.insert(new_lines.len() - 1, String::new());
-                new_lines.insert(new_lines.len() - 1, "# Empty workspace to avoid being part of parent workspace".to_string());
+                new_lines.insert(
+                    new_lines.len() - 1,
+                    "# Empty workspace to avoid being part of parent workspace".to_string(),
+                );
                 new_lines.insert(new_lines.len() - 1, "[workspace]".to_string());
                 new_lines.insert(new_lines.len() - 1, String::new());
                 added_workspace = true;
             }
         }
-        
+
         // If we didn't find another section, add at the end
         if !added_workspace {
             new_lines.push(String::new());
@@ -547,9 +630,9 @@ async fn fix_workspace_issues(projects: &[ProjectInfo]) -> Result<()> {
             new_lines.push("[workspace]".to_string());
             new_lines.push(String::new());
         }
-        
+
         let new_content = new_lines.join("\n");
-        
+
         // Write back to file
         match fs::write(&cargo_toml_path, new_content) {
             Ok(_) => {
@@ -561,18 +644,21 @@ async fn fix_workspace_issues(projects: &[ProjectInfo]) -> Result<()> {
             }
         }
     }
-    
+
     println!("\n═══════════════════════════════════════════════");
     println!("📊 Workspace Fix Summary:");
     println!("✅ Fixed: {} projects", fixed_count);
     if skipped_count > 0 {
-        println!("⏭️  Skipped: {} projects (already had [workspace])", skipped_count);
+        println!(
+            "⏭️  Skipped: {} projects (already had [workspace])",
+            skipped_count
+        );
     }
-    
+
     if fixed_count > 0 {
         println!("\n💡 All projects should now build independently!");
         println!("Try: cargo xtask build");
     }
-    
+
     Ok(())
 }

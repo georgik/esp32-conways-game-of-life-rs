@@ -23,7 +23,7 @@ eeprom24x = "0.7.2"
 embassy-executor    = { version = "0.7.0", features = ["task-arena-size-20480"] }
 embassy-sync        = "0.7.1"
 embassy-time        = "0.4.0"
-esp-hal-embassy = { version = "0.8.1", features = ["esp32s3"] }
+esp-hal-embassy = { version = "0.9.0", features = ["esp32s3"] }
 static_cell         = { version = "2.1.1", features = ["nightly"] }
 heapless = "0.8.0"
 
