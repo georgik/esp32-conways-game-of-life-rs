@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "m5stack-tab5",
     "xtask",
 ]
 exclude = [
