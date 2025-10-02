@@ -2,6 +2,9 @@
 #![no_main]
 
 extern crate alloc;
+
+// ESP-IDF App Descriptor required by newer espflash
+esp_bootloader_esp_idf::esp_app_desc!();
 use alloc::boxed::Box;
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
 

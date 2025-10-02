@@ -17,7 +17,7 @@ esp-backtrace = { version = "0.16.0", features = [
     "println"
 ] }
 esp-println = { version = "0.14.0", features = [ "log-04" ] }
-log = { version = "0.4.27" }
+log = { version = "0.4.28" }
 
 esp-alloc = "0.8.0"
 embedded-graphics = "0.8.1"
@@ -30,7 +30,8 @@ embedded-graphics-framebuf = "0.5.0"
 heapless = "0.8.0"
 embedded-hal-bus = "0.3.0"
 #bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "301f618", default-features = false }
-bevy_ecs = { version = "0.16.1", default-features = false }
+bevy_ecs = { version = "0.17.1", default-features = false }
+esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
 
 [features]
 default = [ "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3", "esp-hal/psram" ]

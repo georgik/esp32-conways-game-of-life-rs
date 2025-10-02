@@ -17,7 +17,7 @@ esp-backtrace = { version = "0.15.1", features = [
     "println"
 ] }
 esp-println = { version = "0.13", features = [ "log" ] }
-log = { version = "0.4.27" }
+log = { version = "0.4.28" }
 
 esp-alloc = "0.7.0"
 embedded-graphics = "0.8.1"
@@ -33,8 +33,9 @@ axp2101 = { git = "https://github.com/georgik/axp2101-rs.git", tag = "v0.2.0" }
 # GPIO Expander
 aw9523 = { git = "https://github.com/georgik/aw9523-rs.git", tag = "v0.2.0" }
 
-bevy_ecs = { version = "0.16.1", default-features = false }
+bevy_ecs = { version = "0.17.1", default-features = false }
 
+esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
 
 [features]
 default = [ "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3", "esp32-s3-box-3" ]

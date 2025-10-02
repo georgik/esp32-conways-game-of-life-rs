@@ -1,6 +1,9 @@
 #![no_std]
 #![no_main]
 
+// ESP-IDF App Descriptor required by newer espflash
+esp_bootloader_esp_idf::esp_app_desc!();
+
 // use esp_bsp::prelude::*;
 // use esp_display_interface_spi_dma::display_interface_spi_dma;
 use embedded_graphics::{

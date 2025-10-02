@@ -27,7 +27,7 @@ cargo run --release
 View the video [here](https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76).
 </video>
 
-The implementation is based on Rust no\_std and Bevy 0.16 no\_std, plus mipidsi crate.
+The implementation is based on Rust no\_std and Bevy ECS no\_std, plus mipidsi crate.
 
 ```
 cd waveshare-esp32-c6-lcd-1_28
@@ -40,7 +40,7 @@ cargo run --release
 
 [Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waheshare ESP32-S3 LCD Touch 1.28 inch](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer:
 
-The implementation is based on Rust no\_std and Bevy 0.16 no\_std, plus mipidsi crate.
+The implementation is based on Rust no\_std and Bevy ECS no\_std, plus mipidsi crate.
 
 ```
 cd waveshare-esp32-s3-touch-lcd-1_28
@@ -53,7 +53,7 @@ cargo run --release
 
 [Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waveshare ESP32-S3 Touch AMOLED 1.8 inch](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm) with DMA and framebuffer:
 
-The implementation is based on Rust no\_std and Bevy 0.16 no\_std, featuring a high-density 368×448 pixel AMOLED display with enhanced font visibility.
+The implementation is based on Rust no\_std and Bevy ECS no\_std, featuring a high-density 368×448 pixel AMOLED display with enhanced font visibility.
 
 ```
 cd waveshare-esp32-s3-touch-amoled-1_8
@@ -363,6 +363,16 @@ cargo xtask all --keep-going
 # Add empty [workspace] sections to prevent conflicts
 cargo xtask fix-workspace
 ```
+
+#### Update Bootloader & Bevy ECS
+```bash
+# Preview what changes would be made
+cargo xtask update-bootloader --dry-run --verbose
+
+# Update ESP-IDF bootloader support and Bevy ECS to latest version
+cargo xtask update-bootloader
+```
+Automatically adds ESP-IDF bootloader support with correct chip-specific features and updates Bevy ECS to the latest version across all projects.
 
 ### 🔧 Development
 

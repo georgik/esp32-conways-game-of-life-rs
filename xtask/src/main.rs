@@ -61,6 +61,15 @@ enum Commands {
     List,
     /// Fix workspace issues by adding empty [workspace] to all projects
     FixWorkspace,
+    /// Update ESP-IDF bootloader support and Bevy ECS to 0.17 across all projects
+    UpdateBootloader {
+        /// Preview changes without applying them
+        #[arg(long)]
+        dry_run: bool,
+        /// Show verbose output
+        #[arg(long, short)]
+        verbose: bool,
+    },
 }
 
 // Project configuration
@@ -143,6 +152,9 @@ async fn main() -> Result<()> {
             verbose,
         } => run_all_tasks(&projects, keep_going, verbose).await,
         Commands::FixWorkspace => fix_workspace_issues(&projects).await,
+        Commands::UpdateBootloader { dry_run, verbose } => {
+            update_bootloader_and_bevy(&projects, dry_run, verbose).await
+        }
     }
 }
 
@@ -213,6 +225,260 @@ async fn list_projects(projects: &[ProjectInfo]) -> Result<()> {
     );
 
     Ok(())
+}
+
+async fn update_bootloader_and_bevy(
+    projects: &[ProjectInfo],
+    dry_run: bool,
+    verbose: bool,
+) -> Result<()> {
+    println!("\n🔧 Updating ESP-IDF bootloader support and Bevy ECS to 0.17");
+    if dry_run {
+        println!("🔍 Running in DRY-RUN mode - no changes will be made");
+    }
+    println!("═══════════════════════════════════════════════════════");
+
+    let mut summary = TaskSummary::new();
+    let mut results = Vec::new();
+
+    for project in projects.iter().filter(|p| p.has_cargo_toml) {
+        println!("\n🔧 Processing: {}", project.name);
+
+        let result = update_project_bootloader_and_bevy(project, dry_run, verbose).await?;
+
+        if result.success {
+            println!("✅ Updated successfully: {}", project.name);
+            if !result.message.is_empty() && verbose {
+                println!("   Changes: {}", result.message);
+            }
+        } else {
+            println!("❌ Update failed: {}", project.name);
+            if !result.message.is_empty() {
+                println!("   Error: {}", result.message);
+            }
+        }
+
+        summary.add_result(&result);
+        results.push(result);
+    }
+
+    println!("\n═══════════════════════════════════════════════════════");
+    println!("📊 Update Summary:");
+    println!("✅ Successfully updated: {} projects", summary.success);
+    if summary.failed > 0 {
+        println!("❌ Failed: {} projects", summary.failed);
+        println!("\nFailed projects:");
+        for result in results.iter().filter(|r| !r.success) {
+            println!("  • {}: {}", result.project, result.message);
+        }
+    }
+
+    if summary.success > 0 {
+        println!("\n💡 Next Steps:");
+        if !dry_run {
+            println!("1. Review updated Cargo.toml files");
+            println!("2. Check for any version display strings in main.rs files");
+            println!("3. Test builds: cargo xtask build");
+            println!("4. Verify functionality of updated projects");
+        } else {
+            println!("1. Review the above output");
+            println!("2. Run without --dry-run to apply updates");
+        }
+    }
+
+    Ok(())
+}
+
+async fn update_project_bootloader_and_bevy(
+    project: &ProjectInfo,
+    dry_run: bool,
+    verbose: bool,
+) -> Result<TaskResult> {
+    let cargo_toml_path = project.path.join("Cargo.toml");
+    let main_rs_path = project.path.join("src").join("main.rs");
+
+    // Read current Cargo.toml
+    let cargo_content = match fs::read_to_string(&cargo_toml_path) {
+        Ok(content) => content,
+        Err(e) => {
+            return Ok(TaskResult {
+                project: project.name.clone(),
+                success: false,
+                message: format!("Failed to read Cargo.toml: {}", e),
+                warnings: Vec::new(),
+            });
+        }
+    };
+
+    let mut changes = Vec::new();
+    let mut new_cargo_content = cargo_content.clone();
+    let mut needs_bootloader_update = false;
+    let mut needs_bevy_update = false;
+
+    // Detect target chip for bootloader feature
+    let chip_feature = if project.name.contains("esp32s3") || project.name.contains("s3") {
+        "esp32s3"
+    } else if project.name.contains("esp32s2") || project.name.contains("s2") {
+        "esp32s2"
+    } else if project.name.contains("esp32c6") || project.name.contains("c6") {
+        "esp32c6"
+    } else if project.name.contains("esp32c3") || project.name.contains("c3") {
+        "esp32c3"
+    } else if project.name.contains("esp32h2") || project.name.contains("h2") {
+        "esp32h2"
+    } else if project.name.contains("esp32c2") || project.name.contains("c2") {
+        "esp32c2"
+    } else {
+        "esp32"  // Default for original ESP32
+    };
+
+    // Check if esp-bootloader-esp-idf is already present
+    if !new_cargo_content.contains("esp-bootloader-esp-idf") {
+        needs_bootloader_update = true;
+        
+        // Find a good place to insert the bootloader dependency
+        if let Some(deps_start) = new_cargo_content.find("[dependencies]") {
+            // Find the end of dependencies section
+            let deps_section = &new_cargo_content[deps_start..];
+            if let Some(next_section) = deps_section.find("\n[").map(|i| i + deps_start) {
+                // Insert before next section
+                let insertion_point = new_cargo_content[..next_section].rfind('\n').unwrap_or(next_section);
+                new_cargo_content.insert_str(
+                    insertion_point + 1,
+                    &format!("esp-bootloader-esp-idf = {{ version = \"0.2.0\", features = [\"{}\"] }}\n", chip_feature),
+                );
+            } else {
+                // Insert at end of file
+                if !new_cargo_content.ends_with('\n') {
+                    new_cargo_content.push('\n');
+                }
+                new_cargo_content.push_str(&format!("esp-bootloader-esp-idf = {{ version = \"0.2.0\", features = [\"{}\"] }}\n", chip_feature));
+            }
+        }
+        changes.push(format!("Added esp-bootloader-esp-idf with {} feature", chip_feature));
+    }
+
+    // Check if Bevy ECS needs updating
+    if new_cargo_content.contains("bevy_ecs") {
+        // Check current version
+        if new_cargo_content.contains("bevy_ecs = { version = \"0.16") {
+            needs_bevy_update = true;
+            new_cargo_content = new_cargo_content.replace(
+                "bevy_ecs = { version = \"0.16",
+                "bevy_ecs = { version = \"0.17",
+            );
+            new_cargo_content = new_cargo_content.replace(
+                "bevy_ecs = { version = \"0.16.1",
+                "bevy_ecs = { version = \"0.17",
+            );
+            changes.push("Updated bevy_ecs from 0.16 to 0.17".to_string());
+        } else if new_cargo_content.contains("bevy_ecs = \"0.16") {
+            needs_bevy_update = true;
+            new_cargo_content = new_cargo_content.replace(
+                "bevy_ecs = \"0.16\"",
+                "bevy_ecs = { version = \"0.17\", default-features = false }",
+            );
+            new_cargo_content = new_cargo_content.replace(
+                "bevy_ecs = \"0.16.1\"",
+                "bevy_ecs = { version = \"0.17\", default-features = false }",
+            );
+            changes.push("Updated bevy_ecs from 0.16 to 0.17".to_string());
+        }
+    }
+
+    let mut main_rs_changes = Vec::new();
+    let mut new_main_content = String::new();
+    let has_main_rs = main_rs_path.exists();
+
+    // Update main.rs if it exists
+    if has_main_rs {
+        match fs::read_to_string(&main_rs_path) {
+            Ok(main_content) => {
+                new_main_content = main_content.clone();
+                
+                // Add bootloader descriptor if not present
+                if needs_bootloader_update && !main_content.contains("esp_bootloader_esp_idf::esp_app_desc!") {
+                    // Find the position after extern crate alloc (if present) or after #![no_main]
+                    if let Some(alloc_pos) = main_content.find("extern crate alloc;") {
+                        let insertion_point = main_content[alloc_pos..].find('\n').map(|i| i + alloc_pos + 1)
+                            .unwrap_or(alloc_pos + "extern crate alloc;".len());
+                        new_main_content.insert_str(
+                            insertion_point,
+                            "\n// ESP-IDF App Descriptor required by newer espflash\nesp_bootloader_esp_idf::esp_app_desc!();\n",
+                        );
+                    } else if let Some(no_main_pos) = main_content.find("#![no_main]") {
+                        let insertion_point = main_content[no_main_pos..].find('\n').map(|i| i + no_main_pos + 1)
+                            .unwrap_or(no_main_pos + "#![no_main]".len());
+                        new_main_content.insert_str(
+                            insertion_point,
+                            "\n// ESP-IDF App Descriptor required by newer espflash\nesp_bootloader_esp_idf::esp_app_desc!();\n",
+                        );
+                    }
+                    main_rs_changes.push("Added ESP-IDF app descriptor".to_string());
+                }
+
+                // Update version display string from 0.16 to 0.17
+                if needs_bevy_update && main_content.contains("Bevy ECS 0.16") {
+                    new_main_content = new_main_content.replace("Bevy ECS 0.16", "Bevy ECS 0.17");
+                    main_rs_changes.push("Updated version display from Bevy ECS 0.16 to 0.17".to_string());
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    println!("   Warning: Failed to read main.rs: {}", e);
+                }
+            }
+        }
+    }
+
+    let has_main_rs_changes = !main_rs_changes.is_empty();
+    changes.extend(main_rs_changes);
+
+    if changes.is_empty() {
+        return Ok(TaskResult {
+            project: project.name.clone(),
+            success: true,
+            message: "No updates needed".to_string(),
+            warnings: Vec::new(),
+        });
+    }
+
+    if verbose {
+        println!("   Planned changes: {}", changes.join(", "));
+    }
+
+    if !dry_run {
+        // Write updated Cargo.toml
+        if needs_bootloader_update || needs_bevy_update {
+            if let Err(e) = fs::write(&cargo_toml_path, &new_cargo_content) {
+                return Ok(TaskResult {
+                    project: project.name.clone(),
+                    success: false,
+                    message: format!("Failed to write Cargo.toml: {}", e),
+                    warnings: Vec::new(),
+                });
+            }
+        }
+
+        // Write updated main.rs if needed
+        if has_main_rs && has_main_rs_changes {
+            if let Err(e) = fs::write(&main_rs_path, &new_main_content) {
+                return Ok(TaskResult {
+                    project: project.name.clone(),
+                    success: false,
+                    message: format!("Failed to write main.rs: {}", e),
+                    warnings: Vec::new(),
+                });
+            }
+        }
+    }
+
+    Ok(TaskResult {
+        project: project.name.clone(),
+        success: true,
+        message: changes.join(", "),
+        warnings: Vec::new(),
+    })
 }
 
 async fn build_all_projects(

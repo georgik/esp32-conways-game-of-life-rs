@@ -15,7 +15,7 @@ esp-backtrace = { version = "0.16.0", features = [
     "println"
 ] }
 esp-println = { version = "0.14.0", features = [ "log-04" ] }
-log = { version = "0.4.27" }
+log = { version = "0.4.28" }
 
 esp-alloc = "0.8.0"
 embedded-graphics = "0.8.1"
