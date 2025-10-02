@@ -1,12 +1,13 @@
-# This is a workspace root for the xtask runner only
 [workspace]
 members = [
+    "m5stack-tab5",
     "xtask",
 ]
 exclude = [
     "esope-*",
-    "esp32-*", 
-    "m5stack-*",
+    "esp32-*",
+    "m5stack-atom-s3",
+    "m5stack-cores3", 
     "waveshare-*",
     "update-deps",
 ]
