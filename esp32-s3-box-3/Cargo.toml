@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 [workspace]
 
 [dependencies]
-esp-hal = { version = "1.0.0-rc.0", features = ["esp32s3", "unstable"] }
+esp-hal = { version = "1.0.0-rc.1", features = ["esp32s3", "unstable"] }
 esp-backtrace = { version = "0.16.0", features = [
     "panic-handler",
     "println"
