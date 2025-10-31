@@ -1,0 +1,4 @@
+
+[alias]
+serve = "run --bin serve --release"
+build-wasm = "build --target wasm32-unknown-unknown --release --lib"

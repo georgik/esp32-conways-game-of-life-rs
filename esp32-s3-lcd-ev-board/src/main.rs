@@ -511,7 +511,7 @@ fn main() -> ! {
 
     // Initialize Game of Life
     let mut game_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
-    let mut rng = Rng::new(peripherals.RNG);
+    let mut rng = Rng::new();
 
     // Initialize with random state
     randomize_grid(&mut rng, &mut game_grid);

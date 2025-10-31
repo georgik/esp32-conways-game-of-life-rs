@@ -6,6 +6,11 @@ Implementation of Conway's Game of Life Rust Bare Metal.
 
 ![ESP32 Conways Game of Life in Rust](docs/esp32-conways-game-of-life-rs.png)
 
+## Recommended Tools
+
+- [CLion with Rust and Wokwi plugins](https://plugins.jetbrains.com/plugin/23826-wokwi-simulator)
+- [VS Code with Rust and Wokwi plugin](https://docs.wokwi.com/vscode/getting-started)
+
 ## Supported boards
 
 ### ESP32-S3-BOX-3 Minimal Implementation
@@ -243,10 +248,10 @@ This is experimental implementation for WASM.
 
 ```
 cd wasm
-wasm-pack build --target web
-wasm-bindgen --target web --out-dir pkg target/wasm32-unknown-unknown/release/conways_wasm.wasm
-python3 -m http.server
+cargo run
 ```
+
+Then navigate to http://localhost:8000/ in your browser.
 
 ### ESP32-WROVER-KIT
 

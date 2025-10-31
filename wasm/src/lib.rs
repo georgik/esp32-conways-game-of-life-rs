@@ -9,7 +9,6 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt::Write;
 
-use alloc::format;
 use bevy_ecs::prelude::*; // includes Resource, NonSendMut, etc.
 use embedded_graphics::{
     Drawable,
@@ -20,7 +19,7 @@ use embedded_graphics::{
     text::Text,
 };
 use embedded_graphics_framebuf::FrameBuf;
-use getrandom;
+extern crate getrandom;
 use log::info;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -81,7 +80,7 @@ impl Default for GameOfLifeResource {
 // Helper function that returns a u32 seed using getrandom.
 fn get_seed() -> u32 {
     let mut buf = [0u8; 4];
-    getrandom::getrandom(&mut buf).expect("failed to get random seed");
+    getrandom::fill(&mut buf).expect("failed to get random seed");
     u32::from_le_bytes(buf)
 }
 
@@ -94,7 +93,7 @@ impl Default for RngResource {
     fn default() -> Self {
         // Get an 8-byte seed from the browser.
         let mut seed_buf = [0u8; 8];
-        getrandom::getrandom(&mut seed_buf).expect("failed to get random seed");
+        getrandom::fill(&mut seed_buf).expect("failed to get random seed");
         let seed = u64::from_le_bytes(seed_buf);
         Self(ChaCha8Rng::seed_from_u64(seed))
     }
@@ -221,7 +220,7 @@ fn update_game_of_life_system(
 }
 
 fn render_system(
-    mut display_res: NonSendMut<DisplayResource>,
+    display_res: NonSendMut<DisplayResource>,
     game: Res<GameOfLifeResource>,
     mut fb_res: ResMut<FrameBufferResource>,
 ) {
@@ -231,7 +230,7 @@ fn render_system(
 
     // Overlay centered text.
     let line1 = "Rust no_std WASM";
-    let line2 = "Bevy ECS 0.15";
+    let line2 = "Bevy ECS 0.17";
     let line1_width = line1.len() as i32 * 8;
     let line2_width = line2.len() as i32 * 8;
     let x1 = (LCD_H_RES as i32 - line1_width) / 2;

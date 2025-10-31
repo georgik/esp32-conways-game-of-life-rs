@@ -368,7 +368,10 @@ fn main() -> ! {
     let mut display: MyDisplay = Builder::new(ILI9486Rgb565, di)
         .reset_pin(reset)
         .display_size(320, 240)
-        // .orientation(Orientation::new().flip_horizontal())
+        // .orientation(mipidsi::options::Orientation::new()
+            // .flip_vertical()
+            // .flip_horizontal()
+        // )
         .color_order(ColorOrder::Bgr)
         // .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)
@@ -384,7 +387,7 @@ fn main() -> ! {
 
     // --- Initialize Game Resources ---
     let mut game = GameOfLifeResource::default();
-    let mut rng_instance = Rng::new(peripherals.RNG);
+    let mut rng_instance = Rng::new();
     randomize_grid(&mut rng_instance, &mut game.grid);
     let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
     for (x, y) in glider.iter() {

@@ -1,10 +1,15 @@
 [package]
-name = "conways-wasm"
-version = "0.1.0"
+name = "wasm-conways-game-of-life"
+version = "0.7.0"
 edition = "2024"
+default-run = "server"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "serve"
+path = "src/bin/serve.rs"
 
 [dependencies]
 wasm-bindgen = "0.2.100"
@@ -14,12 +19,16 @@ log = "0.4"
 embedded-graphics = "0.8.1"
 embedded-graphics-framebuf = "0.5.0"
 embedded-graphics-web-simulator = "0.4.0"
-bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "06cb5c5", default-features = false }
-heapless = "0.8.0"
-console = "0.15.11"
-getrandom = { version = "0.2.8", features = ["js"] }
-rand_chacha = { version = "0.3.1", default-features = false }
-rand_core = "0.6.4"
+bevy_ecs = { version = "0.17.2", default-features = false }
+heapless = "0.9.1"
+console = "0.16.1"
+getrandom = { version = "0.3.4", features = ["wasm_js"]}
+rand_chacha = { version = "0.9.0", default-features = false }
+rand_core = "0.9.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Dependencies for the server (only when not building for wasm)
+tiny_http = "0.12"
 
 #[package.metadata.wasm-pack]
 #wasm-opt = false

@@ -36,10 +36,10 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install espup and set toolchain 1.85.0.0
+      - name: Install espup and set toolchain 1.90.0.0
         run: |
           cargo install espup --locked
-          espup install --toolchain-version 1.85.0.0
+          espup install --toolchain-version 1.90.0.0
           source ~/export-esp.sh
 
       - name: Install espflash CLI
@@ -51,7 +51,7 @@ jobs:
           default: true
           buildtargets: esp32s3
           ldproxy: false
-          version: "1.85.0"
+          version: "1.90.0"
 
       - name: Build Xtensa Projects, Create Flashable Images, and Collect Assets
         run: |

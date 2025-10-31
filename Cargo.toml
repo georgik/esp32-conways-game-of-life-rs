@@ -8,6 +8,7 @@ exclude = [
     "m5stack-atom-s3",
     "m5stack-cores3", 
     "waveshare-*",
+    "wasm",
     "update-deps",
 ]
 resolver = "2"

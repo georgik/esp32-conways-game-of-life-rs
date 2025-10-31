@@ -225,6 +225,10 @@ fn main() -> ! {
 
     let mut display = Builder::new(ILI9486Rgb565, di)
         .reset_pin(reset)
+        .orientation(mipidsi::options::Orientation::new()
+                    .flip_vertical()
+                    .flip_horizontal()
+                )
         .init(&mut delay)
         .unwrap();
 
@@ -236,7 +240,7 @@ fn main() -> ! {
     info!("Hello Conway!");
 
     let mut grid: [[bool; WIDTH]; HEIGHT] = [[false; WIDTH]; HEIGHT];
-    let mut rng = Rng::new(peripherals.RNG);
+    let mut rng = Rng::new();
     randomize_grid(&mut rng, &mut grid);
     let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
     for (x, y) in glider.iter() {
