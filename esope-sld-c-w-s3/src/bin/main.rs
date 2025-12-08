@@ -36,7 +36,6 @@ use embassy_time::Ticker;
 use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::I2c;
 use esp_hal::timer::{AnyTimer, timg::TimerGroup};
-use esp_hal_embassy::Executor;
 use log::{error, info};
 use static_cell::StaticCell;
 
@@ -44,8 +43,10 @@ use static_cell::StaticCell;
 use esp_hal::dma::{CHUNK_SIZE, DmaDescriptor, DmaTxBuf};
 use esp_println::println;
 
+use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::Rng;
-use esp_hal::system::{CpuControl, Stack};
+use esp_hal::system::Stack;
+use esp_rtos::embassy::Executor;
 
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
@@ -225,19 +226,22 @@ const LCD_V_RES_USIZE: usize = 240;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES_USIZE * LCD_V_RES_USIZE;
 
 // Embassy multicore: allocate app core stack
-static mut APP_CORE_STACK: Stack<8192> = Stack::new();
+static APP_CORE_STACK: StaticCell<Stack<8192>> = StaticCell::new();
 
+// PSRAM synchronization signals
 static PSRAM_READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static mut PSRAM_BUF_PTR: *mut u8 = core::ptr::null_mut();
 static mut PSRAM_BUF_LEN: usize = 0;
 
-#[esp_hal_embassy::main]
-async fn main(_spawner: Spawner) -> ! {
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
-    // Initialize TimerGroup and timer1 for app core Embassy time driver
-    let timg1 = TimerGroup::new(peripherals.TIMG1);
-    let timer1: AnyTimer = timg1.timer0.into();
+
+    // Initialize Embassy timer for esp-rtos (Xtensa devices use single timer)
+    let timg0 = TimerGroup::new(peripherals.TIMG0);
+    let timer0: AnyTimer = timg0.timer0.into();
+    esp_rtos::start(timer0);
     println!("Starting up...");
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
     println!("PSRAM allocator initialized");
@@ -271,15 +275,21 @@ async fn main(_spawner: Spawner) -> ! {
     let fb_ptr: *mut Rgb565 = fb_box.as_mut_ptr();
     let psram_buf: &'static mut [u8] =
         unsafe { core::slice::from_raw_parts_mut(fb_ptr as *mut u8, FRAME_BYTES) };
+
     // Verify PSRAM buffer allocation and alignment
     let buf_ptr = psram_buf.as_ptr() as usize;
     info!("PSRAM buffer allocated at address: 0x{buf_ptr:08X}");
     info!("PSRAM buffer length: {}", psram_buf.len());
-    info!("PSRAM buffer alignment modulo 32: {}", buf_ptr % 32);
-    assert!(
-        buf_ptr % 64 == 0,
-        "PSRAM buffer must be 64-byte aligned for DMA"
+    info!("PSRAM buffer alignment: {} bytes", buf_ptr % 64);
+
+    // Ensure 64-byte alignment for DMA
+    assert_eq!(
+        buf_ptr % 64,
+        0,
+        "PSRAM buffer must be 64-byte aligned for DMA, got alignment of {}",
+        buf_ptr % 64
     );
+
     // Publish PSRAM buffer pointer and len for app core
     unsafe {
         PSRAM_BUF_PTR = psram_buf.as_mut_ptr();
@@ -406,7 +416,7 @@ async fn main(_spawner: Spawner) -> ! {
         .with_data15(peripherals.GPIO12);
 
     // Prepare RNG for app core task
-    let rng_for_app = Rng::new(peripherals.RNG);
+    let rng_for_app = Rng::new();
 
     // The PSRAM framebuffer is now used for drawing in the Conway task.
     info!("Entering main loop...");
@@ -421,48 +431,55 @@ async fn main(_spawner: Spawner) -> ! {
         .unwrap()
     };
 
-    // Signal to app core that PSRAM is ready
-    PSRAM_READY.signal(());
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: AnyTimer = timg0.timer0.into();
+    // Split peripherals for multicore usage
+    let (dpi_for_display, rng_for_conway) = (dpi, rng_for_app);
 
-    // Spawn DMA display task on app core (core 1)
-    let mut cpu_control = CpuControl::new(peripherals.CPU_CTRL);
-    let _app_core = cpu_control.start_app_core(
-        unsafe { &mut *core::ptr::addr_of_mut!(APP_CORE_STACK) },
+    // Signal that PSRAM is ready
+    PSRAM_READY.signal(());
+
+    // Initialize software interrupts for multicore support
+    let sw_ints = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+
+    // Start app core with esp-rtos
+    let app_core_stack = APP_CORE_STACK.init(Stack::new());
+    esp_rtos::start_second_core(
+        peripherals.CPU_CTRL,
+        sw_ints.software_interrupt0,
+        sw_ints.software_interrupt1,
+        app_core_stack,
         move || {
-            // Initialize Embassy time driver on app core
-            esp_hal_embassy::init([timer0, timer1]);
-            info!("[CORE 1] App core started, initializing DMA display task");
-            // Initialize and run Embassy executor on app core
             static EXECUTOR: StaticCell<Executor> = StaticCell::new();
             let executor = EXECUTOR.init(Executor::new());
             executor.run(|spawner| {
-                spawner.spawn(dma_display_task(dpi, dma_tx)).ok();
+                spawner
+                    .spawn(dma_display_task(dpi_for_display, dma_tx))
+                    .ok();
             });
         },
     );
 
-    // Core 0: Run Conway task
+    // Main core: Run Conway task
     // Wait until PSRAM is ready
     loop {
         if PSRAM_READY.try_take().is_some() {
             break;
         }
-        // Simple spin wait
         core::hint::spin_loop();
     }
+
     // SAFETY: PSRAM_BUF_PTR and PSRAM_BUF_LEN are published before
     let psram_ptr = unsafe { PSRAM_BUF_PTR };
     let psram_len = unsafe { PSRAM_BUF_LEN };
 
-    static MAIN_EXECUTOR: StaticCell<Executor> = StaticCell::new();
-    let executor = MAIN_EXECUTOR.init(Executor::new());
-    executor.run(|spawner| {
-        spawner
-            .spawn(conway_task(psram_ptr, psram_len, rng_for_app))
-            .ok();
-    });
+    // Spawn Conway task on main core
+    spawner
+        .spawn(conway_task(psram_ptr, psram_len, rng_for_conway))
+        .unwrap();
+
+    // Main loop - this should never exit
+    loop {
+        embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
+    }
 }
 
 // DMA display task running on core 1
@@ -470,11 +487,10 @@ async fn main(_spawner: Spawner) -> ! {
 async fn dma_display_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: DmaTxBuf) {
     info!("[CORE 1] DMA display task started, sending DMA frames");
 
+    const FRAME_SIZE: usize = 320 * 240 * 2; // Fixed to known display size
+
     loop {
-        let safe_chunk_size = 320 * 240 * 2;
-        let frame_bytes = 320 * 240 * 2; // Fixed to known display size
-        let len = safe_chunk_size.min(frame_bytes);
-        dma_tx.set_length(len);
+        dma_tx.set_length(FRAME_SIZE);
 
         match dpi.send(false, dma_tx) {
             Ok(xfer) => {
@@ -491,39 +507,50 @@ async fn dma_display_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: 
                 dma_tx = new_dma_tx;
             }
         }
+
+        // Brief delay to allow other tasks to run
+        embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
     }
 }
 
 // Conway update task running on core 0
 #[embassy_executor::task]
 async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
-    // Reconstruct the framebuffer and game grid
+    // SAFETY: The pointer is valid and initialized before this task starts
     let fb: &mut [Rgb565; LCD_BUFFER_SIZE] =
         unsafe { &mut *(psram_ptr as *mut [Rgb565; LCD_BUFFER_SIZE]) };
-    let mut game_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
-    randomize_grid(&mut rng, &mut game_grid);
-    let mut next_grid = Box::new([[0u8; GRID_WIDTH]; GRID_HEIGHT]);
 
+    let mut game_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
+    let mut next_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
+
+    randomize_grid(&mut rng, &mut game_grid);
     let mut frame_buf = FrameBuf::new(PSRAMFrameBuffer::new(fb), LCD_H_RES_USIZE, LCD_V_RES_USIZE);
+
     let mut ticker = Ticker::every(embassy_time::Duration::from_millis(100));
     let mut generation_count: usize = 0;
     const RESET_AFTER_GENERATIONS: usize = 500;
-    loop {
-        // Log message with core number
-        // println!(
-        //     "Core {}: Updating Game of Life grid...",
-        //     Cpu::current() as usize
-        // );
 
+    loop {
+        // Update game logic
         update_game_of_life(&game_grid, &mut next_grid);
         core::mem::swap(&mut game_grid, &mut next_grid);
-        draw_grid(&mut frame_buf, &game_grid).ok();
+
+        // Draw to framebuffer
+        if let Err(e) = draw_grid(&mut frame_buf, &game_grid) {
+            error!("Failed to draw grid: {e:?}");
+        }
+
         generation_count += 1;
-        write_generation(&mut frame_buf, generation_count).ok();
+        if let Err(e) = write_generation(&mut frame_buf, generation_count) {
+            error!("Failed to write generation: {e:?}");
+        }
+
+        // Reset after certain number of generations
         if generation_count >= RESET_AFTER_GENERATIONS {
             randomize_grid(&mut rng, &mut game_grid);
             generation_count = 0;
         }
+
         ticker.next().await;
     }
 }
