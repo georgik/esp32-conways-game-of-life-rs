@@ -30,7 +30,7 @@ use esp_hal::{
     time::Rate,
 };
 use esp_println::{logger::init_logger_from_env, println};
-use log::info;
+use log::{error, info};
 use mipidsi::{
     Builder,
     interface::SpiInterface,
@@ -340,10 +340,13 @@ fn main() -> ! {
     // let bus = BusManagerSimple::new(i2c_bus);
 
     info!("Initializing AXP2101");
-    // Initialize AXP2101 directly
+    // Initialize AXP2101 directly with soft fallback for simulation
     let axp_interface = I2CPowerManagementInterface::new(i2c_bus);
     let mut axp = Axp2101::new(axp_interface);
-    axp.init().unwrap();
+    match axp.init() {
+        Ok(_) => info!("AXP2101 initialized successfully"),
+        Err(e) => error!("AXP2101 initialization failed (continuing anyway): {:?}", e),
+    }
 
     info!("Initializing GPIO Expander");
     // Get the I2C interface back by consuming the AXP2101

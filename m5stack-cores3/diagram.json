@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "author": "Juraj Michálek <juraj.michalek@espressif.com>",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-m5stack-core-s3",
+      "id": "board",
+      "top": -179.23,
+      "left": -62.59,
+      "attrs": {
+        "serialInterface": "USB_SERIAL_JTAG"
+      }
+    }
+  ],
+  "connections": [
+  ],
+  "dependencies": {}
+}

@@ -1,0 +1,11 @@
+[wokwi]
+version = 1
+
+elf = "target/xtensa-esp32s3-none-elf/release/m5stack-core-s3conways-game-of-life"
+firmware = "target/xtensa-esp32s3-none-elf/release/m5stack-core-s3conways-game-of-life"
+
+#gdbServerPort = 3333
+#elf = "target/xtensa-esp32s3-none-elf/debug/esp32-conways-game-of-life-rs"
+#firmware = "target/xtensa-esp32s3-none-elf/debug/esp32-conways-game-of-life-rs"
+
+
