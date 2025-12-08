@@ -36,9 +36,9 @@ use esp_hal::lcd_cam::{
 use esp_hal::{
     Blocking,
     gpio::{Level, Output, OutputConfig},
-    timer::{AnyTimer, timg::TimerGroup},
     rng::Rng,
     time::Rate,
+    timer::{AnyTimer, timg::TimerGroup},
 };
 use esp_println::logger::init_logger_from_env;
 use log::{error, info};
@@ -66,7 +66,6 @@ const NUM_DMA_DESC: usize = (FRAME_BYTES + CHUNK_SIZE - 1) / CHUNK_SIZE;
 
 #[unsafe(link_section = ".dma")]
 static mut TX_DESCRIPTORS: [DmaDescriptor; NUM_DMA_DESC] = [DmaDescriptor::EMPTY; NUM_DMA_DESC];
-
 
 // Define the I2C expander struct (based on working code)
 struct Tca9554 {
@@ -329,26 +328,22 @@ async fn game_logic_task(
     let mut game_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
     randomize_grid(&mut rng, &mut game_grid);
 
-    let mut ticker = Ticker::every(Duration::from_millis(200));
     let mut generation_count: usize = 0;
 
+    // Initialize frame buffer with initial state
+    draw_grid(&mut frame_buf, &game_grid).unwrap();
+
+    // Copy initial frame to DMA buffer
+    let dst = dma_tx.as_mut_slice();
+    for (i, px) in frame_buf.data.iter().enumerate() {
+        let [lo, hi] = px.into_storage().to_le_bytes();
+        dst[2 * i] = lo;
+        dst[2 * i + 1] = hi;
+    }
+
+    // Main loop - continuous streaming approach
     loop {
-        // Update game logic
-        update_game_of_life(&mut game_grid);
-        generation_count += 1;
-
-        // Draw to framebuffer
-        draw_grid(&mut frame_buf, &game_grid).unwrap();
-
-        // Copy framebuffer to DMA buffer (same as working original)
-        let dst = dma_tx.as_mut_slice();
-        for (i, px) in frame_buf.data.iter().enumerate() {
-            let [lo, hi] = px.into_storage().to_le_bytes();
-            dst[2 * i] = lo;
-            dst[2 * i + 1] = hi;
-        }
-
-        // Perform DMA transfer (same as working original)
+        // Start DMA transfer immediately
         dma_tx.set_length(FRAME_BYTES);
         match dpi.send(false, dma_tx) {
             Ok(xfer) => {
@@ -366,6 +361,22 @@ async fn game_logic_task(
             }
         }
 
+        // While DMA is transferring, update game logic for next frame
+        update_game_of_life(&mut game_grid);
+        generation_count += 1;
+
+        // Draw to framebuffer for next frame
+        draw_grid(&mut frame_buf, &game_grid).unwrap();
+
+        // Copy framebuffer to DMA buffer for next transfer (while current DMA is happening)
+        // This is the key optimization - overlap game computation with DMA transfer
+        let dst = dma_tx.as_mut_slice();
+        for (i, px) in frame_buf.data.iter().enumerate() {
+            let [lo, hi] = px.into_storage().to_le_bytes();
+            dst[2 * i] = lo;
+            dst[2 * i + 1] = hi;
+        }
+
         // Log progress periodically
         if generation_count % 10 == 0 {
             info!("[CORE 0] Generation: {}", generation_count);
@@ -377,9 +388,6 @@ async fn game_logic_task(
             generation_count = 0;
             info!("[CORE 0] Game reset - generation count reached limit");
         }
-
-        // Wait for next update cycle
-        ticker.next().await;
     }
 }
 
@@ -535,8 +543,7 @@ async fn main(spawner: Spawner) -> ! {
     // Set up DMA buffer (same as working original)
     let buf_box: Box<[u8; FRAME_BYTES]> = Box::new([0; FRAME_BYTES]);
     let psram_buf: &'static mut [u8] = Box::leak(buf_box);
-    let dma_tx: DmaTxBuf =
-        unsafe { DmaTxBuf::new(&mut TX_DESCRIPTORS[..], psram_buf).unwrap() };
+    let dma_tx: DmaTxBuf = unsafe { DmaTxBuf::new(&mut TX_DESCRIPTORS[..], psram_buf).unwrap() };
 
     // Initialize framebuffer (same as working original)
     let fb_data: Box<[Rgb565; BUFFER_SIZE]> = Box::new([Rgb565::BLACK; BUFFER_SIZE]);
@@ -547,7 +554,9 @@ async fn main(spawner: Spawner) -> ! {
     let rng = Rng::new();
 
     // Spawn game logic task on main core (Core 0)
-    spawner.spawn(game_logic_task(rng, dpi, dma_tx, frame_buf)).unwrap();
+    spawner
+        .spawn(game_logic_task(rng, dpi, dma_tx, frame_buf))
+        .unwrap();
 
     info!("Embassy Conway's Game of Life started successfully!");
     info!("- Core 0: Running game logic computation and display updates");
