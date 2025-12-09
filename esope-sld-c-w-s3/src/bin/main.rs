@@ -5,8 +5,6 @@ use embedded_graphics::mono_font::{MonoTextStyle, ascii::FONT_8X13};
 use embedded_graphics::text::Text;
 use heapless::String;
 
-use esp_hal::dma::ExternalBurstConfig;
-
 use alloc::boxed::Box;
 use embedded_graphics::{
     Drawable,
@@ -16,6 +14,7 @@ use embedded_graphics::{
 };
 use embedded_graphics_framebuf::FrameBuf;
 use embedded_graphics_framebuf::backends::FrameBufferBackend;
+use esp_hal::dma::ExternalBurstConfig;
 use esp_hal::gpio::Level;
 use esp_hal::gpio::{Output, OutputConfig};
 use esp_hal::lcd_cam::{
@@ -35,7 +34,10 @@ use embassy_sync::signal::Signal;
 use embassy_time::Ticker;
 use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::I2c;
+use esp_hal::rng::Rng;
+use esp_hal::system::Stack;
 use esp_hal::timer::{AnyTimer, timg::TimerGroup};
+use esp_rtos::embassy::Executor;
 use log::{error, info};
 use static_cell::StaticCell;
 
@@ -44,9 +46,6 @@ use esp_hal::dma::{CHUNK_SIZE, DmaDescriptor, DmaTxBuf};
 use esp_println::println;
 
 use esp_hal::interrupt::software::SoftwareInterruptControl;
-use esp_hal::rng::Rng;
-use esp_hal::system::Stack;
-use esp_rtos::embassy::Executor;
 
 // Add ESP-IDF app descriptor for bootloader compatibility
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -275,6 +274,18 @@ async fn main(spawner: Spawner) -> ! {
     // Allocate framebuffer in PSRAM and reuse as DMA buffer
     const FRAME_BYTES: usize = LCD_BUFFER_SIZE * 2;
     let mut fb_box: Box<[Rgb565; LCD_BUFFER_SIZE]> = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
+
+    // Fill with a test pattern to verify display is working
+    for i in 0..LCD_BUFFER_SIZE {
+        let x = i % LCD_H_RES_USIZE;
+        let y = i / LCD_H_RES_USIZE;
+        // Create a simple test pattern - red gradient
+        let r = (x * 31 / LCD_H_RES_USIZE) as u8;
+        let g = 0;
+        let b = (y * 31 / LCD_V_RES_USIZE) as u8;
+        fb_box[i] = Rgb565::new(r, g, b);
+    }
+
     let fb_ptr: *mut Rgb565 = fb_box.as_mut_ptr();
     let psram_buf: &'static mut [u8] =
         unsafe { core::slice::from_raw_parts_mut(fb_ptr as *mut u8, FRAME_BYTES) };
@@ -283,14 +294,10 @@ async fn main(spawner: Spawner) -> ! {
     let buf_ptr = psram_buf.as_ptr() as usize;
     info!("PSRAM buffer allocated at address: 0x{buf_ptr:08X}");
     info!("PSRAM buffer length: {}", psram_buf.len());
-    info!("PSRAM buffer alignment: {} bytes", buf_ptr % 64);
-
-    // Ensure 64-byte alignment for DMA
-    assert_eq!(
-        buf_ptr % 64,
-        0,
-        "PSRAM buffer must be 64-byte aligned for DMA, got alignment of {}",
-        buf_ptr % 64
+    info!("PSRAM buffer alignment modulo 32: {}", buf_ptr % 32);
+    assert!(
+        buf_ptr % 64 == 0,
+        "PSRAM buffer must be 64-byte aligned for DMA"
     );
 
     // Publish PSRAM buffer pointer and len for app core
@@ -312,6 +319,9 @@ async fn main(spawner: Spawner) -> ! {
 
     // Touch reset line
     let mut _touch_reset = Output::new(peripherals.GPIO2, Level::High, OutputConfig::default());
+
+    // Add a delay to ensure the display power is stable
+    embassy_time::Timer::after(embassy_time::Duration::from_millis(100)).await;
 
     // Initialize the parallel‐RGB display via DPI
     let lcd_cam = LcdCam::new(peripherals.LCD_CAM);
@@ -490,10 +500,9 @@ async fn main(spawner: Spawner) -> ! {
 async fn dma_display_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: DmaTxBuf) {
     info!("[CORE 1] DMA display task started, sending DMA frames");
 
-    const FRAME_SIZE: usize = 320 * 240 * 2; // Fixed to known display size
-
     loop {
-        dma_tx.set_length(FRAME_SIZE);
+        let frame_bytes = 320 * 240 * 2; // Fixed to known display size
+        dma_tx.set_length(frame_bytes);
 
         match dpi.send(false, dma_tx) {
             Ok(xfer) => {
@@ -510,9 +519,6 @@ async fn dma_display_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: 
                 dma_tx = new_dma_tx;
             }
         }
-
-        // Brief delay to allow other tasks to run
-        embassy_time::Timer::after(embassy_time::Duration::from_millis(1)).await;
     }
 }
 
@@ -539,14 +545,10 @@ async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
         core::mem::swap(&mut game_grid, &mut next_grid);
 
         // Draw to framebuffer
-        if let Err(e) = draw_grid(&mut frame_buf, &game_grid) {
-            error!("Failed to draw grid: {e:?}");
-        }
+        draw_grid(&mut frame_buf, &game_grid).ok();
 
         generation_count += 1;
-        if let Err(e) = write_generation(&mut frame_buf, generation_count) {
-            error!("Failed to write generation: {e:?}");
-        }
+        write_generation(&mut frame_buf, generation_count).ok();
 
         // Reset after certain number of generations
         if generation_count >= RESET_AFTER_GENERATIONS {
