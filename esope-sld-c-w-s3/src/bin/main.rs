@@ -48,6 +48,9 @@ use esp_hal::rng::Rng;
 use esp_hal::system::Stack;
 use esp_rtos::embassy::Executor;
 
+// Add ESP-IDF app descriptor for bootloader compatibility
+esp_bootloader_esp_idf::esp_app_desc!();
+
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     error!("Panic: {_info}");
