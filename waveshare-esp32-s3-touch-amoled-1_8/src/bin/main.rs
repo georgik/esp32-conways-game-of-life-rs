@@ -4,6 +4,7 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+esp_bootloader_esp_idf::esp_app_desc!();
 use bevy_ecs::prelude::*;
 use core::fmt::Write;
 use embedded_graphics::{
@@ -465,7 +466,7 @@ fn main() -> ! {
     };
 
     // Initialize RNG
-    let mut rng = Rng::new(peripherals.RNG);
+    let mut rng = Rng::new();
 
     // Initialize game resources
     let mut game = GameOfLifeResource::default();
