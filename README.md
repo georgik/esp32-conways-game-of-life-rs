@@ -91,6 +91,32 @@ cd m5stack-atom-s3
 cargo run --release
 ```
 
+### M5Stack Atom-S3R
+
+![ESP32 Conways Game of Life in Rust - M5Stack Atom-S3R with Bevy ECS](docs/m5stack-atom-s3r.jpg)
+
+- https://docs.m5stack.com/en/core/AtomS3R
+
+Controls: Press button under display to reset the game state (GPIO 41).
+
+The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
+
+Installation of the toolchain:
+
+```
+cargo install espup
+espup install --toolchain-version 1.85.0.0
+source ~/export-esp.sh
+```
+
+Build:
+
+```
+cd m5stack-atom-s3r
+cargo run --release
+```
+
 ### M5Stack CoreS3
 
 ![ESP32 Conways Game of Life in Rust - M5Stack CoreS3 with Bevy ECS](docs/m5stack-cores3-conway.jpg)
@@ -224,7 +250,7 @@ Board: [SDL\_C\_W\_S3](https://esope.de/en/products)
 Display: RGB [Schukat Smartwin display-concept](https://shop.schukat.com/de/de/EUR/c/ESOP)
 
 The implementation is based on Embassy Async Rust no\_std with RGB interface.
-Both cores of ESP32-S3 are used. One core is handling DMA transfers to the display, 
+Both cores of ESP32-S3 are used. One core is handling DMA transfers to the display,
 while the other core is running the game logic.
 
 RGB displays are very time-sensitive, so the timing of the display must be precise, that's also why
@@ -295,7 +321,7 @@ This repository includes a comprehensive **Rust-based maintenance tool** that re
    ```bash
    # Install cargo-edit for dependency updates
    cargo install cargo-edit
-   
+
    # Build the xtask tool
    cargo build
    ```
@@ -318,7 +344,7 @@ cargo xtask list
 ```
 Shows all discovered ESP32 projects and their status.
 
-#### Build All Projects  
+#### Build All Projects
 ```bash
 # Build all projects (stops on first failure)
 cargo xtask build
