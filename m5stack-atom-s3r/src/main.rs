@@ -375,7 +375,7 @@ fn render_system(
     write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
 
     // --- Overlay centered text ---
-    let line1 = "Rust - ATOM-S3";
+    let line1 = "Rust - ATOM-S3R";
     let line2 = "Bevy ECS no_std";
     // Estimate text width: assume ~8 pixels per character.
     let line1_width = line1.len() as i32 * 8;
