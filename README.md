@@ -93,7 +93,7 @@ cargo run --release
 
 ### M5Stack Atom-S3R
 
-![ESP32 Conways Game of Life in Rust - M5Stack Atom-S3R with Bevy ECS](docs/m5stack-atom-s3r.jpg)
+![ESP32 Conways Game of Life in Rust - M5Stack Atom-S3R with Bevy ECS](docs/m5stack-atom-s3r.webp)
 
 - https://docs.m5stack.com/en/core/AtomS3R
 
