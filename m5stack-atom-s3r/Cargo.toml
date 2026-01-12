@@ -1,7 +1,10 @@
 [package]
 name = "m5stack-atom-s3r-conways-game-of-life"
 version = "0.7.0"
-authors = ["Juraj Michálek <juraj.michalek@espressif.com>"]
+authors = [
+    "Juraj Michálek <juraj.michalek@espressif.com>",
+    "Kris van Rens <kris@vanrens.org>"
+]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
