@@ -143,6 +143,33 @@ cd m5stack-cores3
 cargo run --release
 ```
 
+### M5Stack Core2
+
+![ESP32 Conways Game of Life in Rust - M5Stack Core2 with Bevy ECS](docs/m5stack-core2-conway.webp)
+
+- https://docs.m5stack.com/en/core/Core2
+
+Controls: Press the button under display to reset the game state.
+
+Note: Press Boot button and reset to enter download mode.
+
+The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+This board uses the original ESP32 (Xtensa) chip with external PSRAM.
+
+Installation of the toolchain:
+
+```
+espup install
+source ~/export-esp.sh
+```
+
+Build:
+
+```
+cd m5stack-core2
+cargo run --release
+```
+
 ### ESP32-S3-BOX-3
 
 ![ESP32 Conways Game of Life in Rust - ESP32-S3-BOX-3 with Bevy ECS](docs/esp32-s3-box-3-conway.jpg)
