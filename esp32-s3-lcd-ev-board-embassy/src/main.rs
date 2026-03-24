@@ -19,7 +19,7 @@ use embedded_graphics_framebuf::backends::FrameBufferBackend;
 
 // Embassy imports
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Ticker};
+use embassy_time::Duration;
 
 // ESP-HAL imports
 use esp_hal::clock::CpuClock::_240MHz;
@@ -52,7 +52,6 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 // --- DISPLAY CONFIGURATION ---
 const LCD_H_RES: u16 = 480;
 const LCD_V_RES: u16 = 480;
-const LCD_BUFFER_SIZE: usize = LCD_H_RES as usize * LCD_V_RES as usize;
 const BUFFER_SIZE: usize = LCD_H_RES as usize * LCD_V_RES as usize;
 
 // --- Game of Life Definitions ---
@@ -404,14 +403,14 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Starting ESP32-S3 LCD EV Board Embassy Conway's Game of Life");
 
-    // Setup I2C for the TCA9554 IO expander
+    // Setup I2C for the TCA9554 IO expander (STANDARD module pinout)
     let i2c = I2c::new(
         peripherals.I2C0,
         i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
     )
     .unwrap()
-    .with_sda(peripherals.GPIO47)
-    .with_scl(peripherals.GPIO48);
+    .with_sda(peripherals.GPIO8)
+    .with_scl(peripherals.GPIO18);
 
     // Initialize the IO expander for controlling the display
     let mut expander = Tca9554::new(i2c);
@@ -526,8 +525,8 @@ async fn main(spawner: Spawner) -> ! {
         .with_data4(peripherals.GPIO14)
         // Green
         .with_data5(peripherals.GPIO21)
-        .with_data6(peripherals.GPIO8)
-        .with_data7(peripherals.GPIO18)
+        .with_data6(peripherals.GPIO47)
+        .with_data7(peripherals.GPIO48)
         .with_data8(peripherals.GPIO45)
         .with_data9(peripherals.GPIO38)
         .with_data10(peripherals.GPIO39)
