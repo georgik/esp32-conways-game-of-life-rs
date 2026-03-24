@@ -370,13 +370,14 @@ fn main() -> ! {
     init_logger_from_env();
 
     // Setup I2C for the TCA9554 IO expander
+    // NOTE: Use GPIO8/18 for non-R16 modules or GPIO47/48 for R16 modules
     let i2c = I2c::new(
         peripherals.I2C0,
         i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
     )
     .unwrap()
-    .with_sda(peripherals.GPIO47)
-    .with_scl(peripherals.GPIO48);
+    .with_sda(peripherals.GPIO8)
+    .with_scl(peripherals.GPIO18);
 
     // Initialize the IO expander for controlling the display
     let mut expander = Tca9554::new(i2c);
@@ -495,8 +496,8 @@ fn main() -> ! {
         .with_data4(peripherals.GPIO14)
         // Green
         .with_data5(peripherals.GPIO21)
-        .with_data6(peripherals.GPIO8)
-        .with_data7(peripherals.GPIO18)
+        .with_data6(peripherals.GPIO47)
+        .with_data7(peripherals.GPIO48)
         .with_data8(peripherals.GPIO45)
         .with_data9(peripherals.GPIO38)
         .with_data10(peripherals.GPIO39)
