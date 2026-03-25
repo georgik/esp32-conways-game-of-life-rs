@@ -176,7 +176,7 @@ const INIT_CMDS: &[InitCmd] = &[
             0x03, 0xd0, 0x03, 0xe0, 0x03, 0xea, 0x03, 0xfa, 0x03, 0xff,
         ],
     ),
-    InitCmd::Cmd(0x36, &[0x00]),
+    InitCmd::Cmd(0x36, &[0x00]), // Original value - try different approach
     InitCmd::Cmd(0x2A, &[0x00, 0x00, 0x01, 0xDF]), // 0 to 479 (0x1DF)
     InitCmd::Cmd(0x2B, &[0x00, 0x00, 0x01, 0xDF]), // 0 to 479 (0x1DF)
     InitCmd::Cmd(0x3A, &[0x66]),
@@ -403,14 +403,14 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Starting ESP32-S3 LCD EV Board Embassy Conway's Game of Life");
 
-    // Setup I2C for the TCA9554 IO expander (STANDARD module pinout)
+    // Setup I2C for the TCA9554 IO expander (Board v1.5 - R16 module)
     let i2c = I2c::new(
         peripherals.I2C0,
         i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
     )
     .unwrap()
-    .with_sda(peripherals.GPIO8)
-    .with_scl(peripherals.GPIO18);
+    .with_sda(peripherals.GPIO47)
+    .with_scl(peripherals.GPIO48);
 
     // Initialize the IO expander for controlling the display
     let mut expander = Tca9554::new(i2c);
@@ -525,8 +525,8 @@ async fn main(spawner: Spawner) -> ! {
         .with_data4(peripherals.GPIO14)
         // Green
         .with_data5(peripherals.GPIO21)
-        .with_data6(peripherals.GPIO47)
-        .with_data7(peripherals.GPIO48)
+        .with_data6(peripherals.GPIO8)
+        .with_data7(peripherals.GPIO18)
         .with_data8(peripherals.GPIO45)
         .with_data9(peripherals.GPIO38)
         .with_data10(peripherals.GPIO39)
