@@ -196,6 +196,8 @@ cargo run --release
 
 ### ESP32-S3-LCD-Ev-Board
 
+The configuration is for board revision v1.5.
+
 ![ESP32 Conways Game of Life in Rust - ESP32-S3-LCD-Ev-Board with Bevy ECS](docs/esp32-s3-lcd-ev-board-conway.jpg)
 
 [ESP32-S3-LCD-Ev-Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-lcd-ev-board/index.html)

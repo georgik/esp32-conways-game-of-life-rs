@@ -376,8 +376,8 @@ fn main() -> ! {
         i2c::master::Config::default().with_frequency(Rate::from_khz(400)),
     )
     .unwrap()
-    .with_sda(peripherals.GPIO8)
-    .with_scl(peripherals.GPIO18);
+    .with_sda(peripherals.GPIO47)
+    .with_scl(peripherals.GPIO48);
 
     // Initialize the IO expander for controlling the display
     let mut expander = Tca9554::new(i2c);
@@ -496,8 +496,8 @@ fn main() -> ! {
         .with_data4(peripherals.GPIO14)
         // Green
         .with_data5(peripherals.GPIO21)
-        .with_data6(peripherals.GPIO47)
-        .with_data7(peripherals.GPIO48)
+        .with_data6(peripherals.GPIO8)
+        .with_data7(peripherals.GPIO18)
         .with_data8(peripherals.GPIO45)
         .with_data9(peripherals.GPIO38)
         .with_data10(peripherals.GPIO39)
