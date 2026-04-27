@@ -4,12 +4,53 @@ Implementation of Conway's Game of Life Rust Bare Metal.
 
 [![Wokwi](https://img.shields.io/endpoint?url=https%3A%2F%2Fwokwi.com%2Fbadge%2Fclick-to-simulate.json)](https://wokwi.com/projects/380370193649185793)
 
-![ESP32 Conways Game of Life in Rust](docs/esp32-conways-game-of-life-rs.png)
+![ESP32 Conways Game of Life in Rust](docs/esp32s3-game-of-life-rs.png)
 
 ## Recommended Tools
 
 - [CLion with Rust and Wokwi plugins](https://plugins.jetbrains.com/plugin/23826-wokwi-simulator)
 - [VS Code with Rust and Wokwi plugin](https://docs.wokwi.com/vscode/getting-started)
+
+## Dependencies and Requirements
+
+This project uses ESP-HAL 1.1.0 for Rust bare-metal development on ESP32 microcontrollers. The examples support various ESP32 boards with different configurations including PSRAM, DMA, and display interfaces.
+
+### Toolchain Requirements
+
+Most examples require the ESP Rust toolchain. For ESP32-S3 boards, use toolchain version 1.85.0.0 or later (for Edition 2024 support). For original ESP32 (Xtensa), use the stable toolchain.
+
+Install the toolchain:
+```bash
+cargo install espup
+espup install --toolchain-version 1.85.0.0
+source ~/export-esp.sh
+```
+
+### Project Maintenance
+
+This repository includes a comprehensive Rust-based maintenance tool (xtask) for managing multiple ESP32 embedded projects. See the "Project Maintenance with xtask" section below for details on batch building, dependency updates, and code formatting across all examples.
+
+## Build Status
+
+**Current Status: 12/14 examples building successfully (86%)**
+
+Successfully building examples:
+- m5stack-core2 (ESP32)
+- waveshare-esp32-c6-lcd-1_47 (ESP32-C6 RISC-V)
+- esp32-c3-lcdkit (ESP32-C3)
+- esp32-s3-box-3 (ESP32-S3)
+- esp32-s3-box-3-minimal (ESP32-S3)
+- esp32-s3-lcd-ev-board (ESP32-S3)
+- esp32-wrover-kit (ESP32)
+- m5stack-cores3 (ESP32-S3)
+- waveshare-esp32-s3-touch-lcd-1_28 (ESP32-S3)
+- m5stack-atom-s3 (ESP32-S3)
+- m5stack-atom-s3r (ESP32-S3)
+- waveshare-esp32-s3-touch-amoled-1_8 (ESP32-S3)
+
+Projects requiring updates:
+- esope-sld-c-w-s3 (Embassy API migration in progress)
+- esp32-s3-lcd-ev-board-embassy (Embassy API migration in progress)
 
 ## Supported boards
 
@@ -17,7 +58,7 @@ Implementation of Conway's Game of Life Rust Bare Metal.
 
 - https://github.com/espressif/esp-box
 
-The implementation is based on Rust no\_std, using mipidsi crate.
+The implementation is based on Rust no_std, using mipidsi crate.
 
 ```
 cd esp32-s3-box-3-minimal
@@ -26,13 +67,13 @@ cargo run --release
 
 ### Waveshare ESP32-C6-LCD 1.47
 
-[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on 1.47 inch [ESP32-C6 LCD Waheshare](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer - [Conway's Game of Life](https://github.com/georgik/esp32-conways-game-of-life-rs/tree/main/esp32-c6-waveshare-1_47):
+[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on 1.47 inch [ESP32-C6 LCD Waheshare](https://www.waveshare.com/esp32-c6-lcd-1_47.htm) with DMA and framebuffer - [Conway's Game of Life](https://github.com/georgik/esp32-conways-game-of-life-rs/tree/main/esp32-c6-waveshare-1_47):
 
 <video src="https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76" controls width="640">
 View the video [here](https://github.com/user-attachments/assets/e9d48ff7-b14c-4874-9521-fe59e915bc76).
 </video>
 
-The implementation is based on Rust no\_std and Bevy ECS no\_std, plus mipidsi crate.
+The implementation is based on Rust no_std and Bevy ECS no_std, plus mipidsi crate.
 
 ```
 cd waveshare-esp32-c6-lcd-1_28
@@ -41,27 +82,27 @@ cargo run --release
 
 ### Waveshare ESP32-S3-Touch-LCD 1.28
 
-![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch LCD with Bevy ECS](docs/waveshare-esp32-s3-touch-lcd-1_28.jpg)
+![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch LCD with Bevy ECS](docs/waveshare-esp32s3-touch-lcd-1_28.jpg)
 
-[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waheshare ESP32-S3 LCD Touch 1.28 inch](https://www.waveshare.com/esp32-c6-lcd-1.47.htm) with DMA and framebuffer:
+[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waheshare ESP32-S3 LCD Touch 1.28 inch](https://www.waveshare.com/esp32-c6-lcd-1_47.htm) with DMA and framebuffer:
 
-The implementation is based on Rust no\_std and Bevy ECS no\_std, plus mipidsi crate.
+The implementation is based on Rust no_std and Bevy ECS no_std, plus mipidsi crate.
 
 ```
-cd waveshare-esp32-s3-touch-lcd-1_28
+cd waveshare-esp32s3-touch-lcd-1_28
 cargo run --release
 ```
 
 ### Waveshare ESP32-S3-Touch-AMOLED 1.8
 
-![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch AMOLED with Bevy ECS](docs/waveshare-esp32-s3-touch-amoled-1_8.jpg)
+![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch AMOLED with Bevy ECS](docs/waveshare-esp32s3-touch-amoled-1_8.jpg)
 
-[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waveshare ESP32-S3 Touch AMOLED 1.8 inch](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm) with DMA and framebuffer:
+[Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waveshare ESP32-S3 Touch AMOLED 1.8 inch](https://www.waveshare.com/esp32s3-touch-amoled-1_8.htm) with DMA and framebuffer:
 
-The implementation is based on Rust no\_std and Bevy ECS no\_std, featuring a high-density 368×448 pixel AMOLED display with enhanced font visibility.
+The implementation is based on Rust no_std and Bevy ECS no_std, featuring a high-density 368x448 pixel AMOLED display with enhanced font visibility. Updated to use sh8601-rs driver from GitHub (feature/esp-hal-1.1.0 branch).
 
 ```
-cd waveshare-esp32-s3-touch-amoled-1_8
+cd waveshare-esp32s3-touch-amoled-1_8
 cargo run --release
 ```
 
@@ -73,7 +114,7 @@ cargo run --release
 
 Controls: Press button under display to reset the game state (GPIO 41).
 
-The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+The implementation is based on Rust no_std, using mipidsi crate and Bevy ECS.
 It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
 
 Installation of the toolchain:
@@ -99,7 +140,7 @@ cargo run --release
 
 Controls: Press button under display to reset the game state (GPIO 41).
 
-The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+The implementation is based on Rust no_std, using mipidsi crate and Bevy ECS.
 It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
 
 Installation of the toolchain:
@@ -127,7 +168,7 @@ Controls: Press the button under display to reset the game state.
 
 Note: Press Boot button and reset to enter download mode.
 
-The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+The implementation is based on Rust no_std, using mipidsi crate and Bevy ECS.
 
 Installation of the toolchain:
 
@@ -149,11 +190,11 @@ cargo run --release
 
 - https://docs.m5stack.com/en/core/Core2
 
-Controls: Press the button under display to reset the game state.
+Controls: Press button under display to reset the game state.
 
 Note: Press Boot button and reset to enter download mode.
 
-The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+The implementation is based on Rust no_std, using mipidsi crate and Bevy ECS.
 This board uses the original ESP32 (Xtensa) chip with external PSRAM.
 
 Installation of the toolchain:
@@ -176,7 +217,7 @@ cargo run --release
 
 - https://github.com/espressif/esp-box
 
-The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+The implementation is based on Rust no_std, using mipidsi crate and Bevy ECS.
 It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
 
 Installation of the toolchain:
@@ -198,9 +239,9 @@ cargo run --release
 
 The configuration is for board revision v1.5.
 
-![ESP32 Conways Game of Life in Rust - ESP32-S3-LCD-Ev-Board with Bevy ECS](docs/esp32-s3-lcd-ev-board-conway.jpg)
+![ESP32 Conways Game of Life in Rust - ESP32-S3-LCD-Ev-Board with Bevy ECS](docs/esp32s3-lcd-ev-board-conway.jpg)
 
-[ESP32-S3-LCD-Ev-Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-lcd-ev-board/index.html)
+[ESP32-S3-LCD-Ev-Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32s3-lcd-ev-board/index.html)
 is more complex when it comes to the display. Initialization sequence for the display is:
 - initialize I2C
 - tunnel SPI commands via I2C bus
@@ -271,14 +312,16 @@ cd esp32-c3-lcdkit
 cargo run --release
 ```
 
-### ESoPe SLD\_C\_W\_S3
+### ESoPe SLD_C_W_S3
 
 ![ESP32 Conways Game of Life in Rust - ESoPe SLD_C_W_S3](docs/esope-sld-c-w-s3.jpg)
 
-Board: [SDL\_C\_W\_S3](https://esope.de/en/products)
+Board: [SDL_C_W_S3](https://esope.de/en/products)
 Display: RGB [Schukat Smartwin display-concept](https://shop.schukat.com/de/de/EUR/c/ESOP)
 
-The implementation is based on Embassy Async Rust no\_std with RGB interface.
+**Note:** This example requires manual Embassy API updates and is currently not building. The Embassy async framework integration for esp-hal 1.1.0 requires updating task spawning and initialization code. See the upgrade documentation for details.
+
+The implementation is based on Embassy Async Rust no_std with RGB interface.
 Both cores of ESP32-S3 are used. One core is handling DMA transfers to the display,
 while the other core is running the game logic.
 
@@ -286,16 +329,6 @@ RGB displays are very time-sensitive, so the timing of the display must be preci
 one core is dedicated to the display.
 
 The display configuration is stored in EEPROM for this specific display type.
-
-Run:
-```
-cd esope-sld-c-w-s3
-cargo r -r
-```
-
-The board requires connection using ESP-Prog. You need to switch the board into boot mode.
-Press and hold the BOOT button, then press the RESET button, then release the BOOT button.
-Press the RESET button again to start the program.
 
 ### WASM
 
@@ -314,7 +347,7 @@ This board is no longer in production, yet it's still used by many developers.
 
 ![ESP32 Conways Game of Life in Rust - ESP-WROVER-KIT with Bevy ECS](docs/esp32-wrover-kit.jpg)
 
-The implementation is based on Rust no\_std, using mipidsi crate and Bevy ECS.
+The implementation is based on Rust no_std, using mipidsi crate and Bevy ECS.
 It requires es-rs toolchain for ESP32-S3 version at [least 1.88](https://github.com/esp-rs/rust-build/releases/tag/v1.88.0.0), because of edition 2024.
 
 Installation of the toolchain:
@@ -334,11 +367,11 @@ cargo run --release
 
 ---
 
-## 📦 Project Maintenance with xtask
+## Project Maintenance with xtask
 
 This repository includes a comprehensive **Rust-based maintenance tool** that replaces shell scripts for managing multiple ESP32 embedded projects.
 
-### 🛠️ Installation & Setup
+### Installation & Setup
 
 1. **Clone the repository**:
    ```bash
@@ -365,7 +398,7 @@ This repository includes a comprehensive **Rust-based maintenance tool** that re
    cargo xtask fix-workspace
    ```
 
-### 📋 Available Commands
+### Available Commands
 
 #### List Projects
 ```bash
@@ -434,7 +467,7 @@ cargo xtask update-bootloader
 ```
 Automatically adds ESP-IDF bootloader support with correct chip-specific features and updates Bevy ECS to the latest version across all projects.
 
-### 🔧 Development
+### Development
 
 #### Adding New Commands
 The tool is designed for easy extension. To add new commands:
@@ -443,3 +476,59 @@ The tool is designed for easy extension. To add new commands:
 2. Implement the command handler function
 3. Add the match arm in `main()`
 
+#### Utility Modules
+
+The `xtask/src/modules/` directory contains specialized modules:
+
+- **project**: Project discovery and structure
+- **build**: Batch building with progress tracking
+- **update**: Automated dependency management
+- **config**: Build configuration cleanup
+- **migrate**: API migration helpers
+- **psram_feature**: PSRAM configuration updates
+
+#### Advanced Migration Features
+
+The xtask includes specialized migration tools for ESP-HAL upgrades:
+
+- **Migrate PSRAM**: Converts compile-time PSRAM configuration to runtime API
+- **Migrate Embassy**: Updates Embassy task spawning and initialization
+- **Fix Cargo.toml**: Repairs TOML syntax errors and missing quotes
+- **Scan Cargo**: Identifies and fixes corrupted Cargo.toml files
+
+These tools have been validated across 14 ESP32 projects during the ESP-HAL 1.0.0 to 1.1.0 upgrade process.
+
+### Build Validation
+
+To validate the build status of all examples:
+
+```bash
+cargo xtask build --keep-going
+```
+
+This provides a comprehensive report of successful and failed builds, allowing for quick identification of compilation issues.
+
+## Architecture Overview
+
+This repository demonstrates multiple approaches to embedded Rust development:
+
+1. **Blocking I/O**: Traditional bare-metal approach with direct peripheral control
+2. **Bevy ECS no_std**: Entity Component System for game logic organization
+3. **Embassy Async**: Async/await framework for concurrent operations (dual-core examples)
+4. **DMA Transfers**: High-performance display updates using DMA
+
+Each example is optimized for its specific hardware capabilities while maintaining consistent game logic across different platforms.
+
+## Contributing
+
+When adding new board support or modifying existing examples:
+
+1. Follow the existing project structure in the `src/` directory
+2. Ensure proper `rust-toolchain.toml` configuration for the target chip
+3. Include appropriate `[workspace]` section in Cargo.toml
+4. Test with `cargo xtask build` before committing
+5. Update this README with board-specific information
+
+## License
+
+This project is open source and available under the MIT OR Apache-2.0 license.

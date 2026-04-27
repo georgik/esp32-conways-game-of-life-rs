@@ -18,6 +18,7 @@ use embedded_graphics_framebuf::{FrameBuf, backends::FrameBufferBackend};
 use embedded_hal::delay::DelayNs;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::Blocking;
+use esp_hal::psram::Psram;
 use esp_hal::{
     delay::Delay,
     dma::{DmaRxBuf, DmaTxBuf},
@@ -321,7 +322,8 @@ fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     // PSRAM allocator for heap memory.
-    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    let psram = Psram::new(peripherals.PSRAM, Default::default());
+    esp_alloc::psram_allocator!(&psram);
 
     init_logger_from_env();
 

@@ -24,6 +24,7 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
+use esp_hal::psram::Psram;
 use esp_hal::{
     Blocking,
     gpio::{DriveMode, Level, Output, OutputConfig},
@@ -322,7 +323,8 @@ fn main() -> ! {
 
     // PSRAM allocator for heap memory.
     // Note: Placing framebuffer into PSRAM might result into slower redraw.
-    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    let psram = Psram::new(peripherals.PSRAM, Default::default());
+    esp_alloc::psram_allocator!(&psram);
     // esp_alloc::heap_allocator!(size: 150 * 1024);
 
     init_logger_from_env();
@@ -369,8 +371,8 @@ fn main() -> ! {
         .reset_pin(reset)
         .display_size(320, 240)
         // .orientation(mipidsi::options::Orientation::new()
-            // .flip_vertical()
-            // .flip_horizontal()
+        // .flip_vertical()
+        // .flip_horizontal()
         // )
         .color_order(ColorOrder::Bgr)
         // .invert_colors(ColorInversion::Inverted)

@@ -17,14 +17,16 @@ fn main() {
 }
 
 fn setup_xtensa_environment() {
-    let home_dir = env::var("HOME").unwrap_or_else(|_| {
-        env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
-    });
+    let home_dir = env::var("HOME")
+        .unwrap_or_else(|_| env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string()));
 
     let export_script = PathBuf::from(&home_dir).join("export-esp.sh");
 
     if !export_script.exists() {
-        eprintln!("Warning: {} not found. Please ensure Xtensa toolchain is in PATH.", export_script.display());
+        eprintln!(
+            "Warning: {} not found. Please ensure Xtensa toolchain is in PATH.",
+            export_script.display()
+        );
         return;
     }
 
@@ -37,7 +39,9 @@ fn setup_xtensa_environment() {
             if line.starts_with("export LIBCLANG_PATH=") {
                 if let Some(path) = extract_path_from_export(line, "LIBCLANG_PATH") {
                     println!("cargo:rustc-env=LIBCLANG_PATH={}", path);
-                    unsafe { env::set_var("LIBCLANG_PATH", &path); }
+                    unsafe {
+                        env::set_var("LIBCLANG_PATH", &path);
+                    }
                 }
             }
 
@@ -51,7 +55,9 @@ fn setup_xtensa_environment() {
                         format!("{}:{}", path_addition, current_path)
                     };
                     println!("cargo:rustc-env=PATH={}", new_path);
-                    unsafe { env::set_var("PATH", &new_path); }
+                    unsafe {
+                        env::set_var("PATH", &new_path);
+                    }
                 }
             }
         }
@@ -86,9 +92,8 @@ fn extract_path_addition(line: &str) -> Option<String> {
 
 fn expand_home(path: &str) -> String {
     if path.starts_with("~/") {
-        let home_dir = env::var("HOME").unwrap_or_else(|_| {
-            env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
-        });
+        let home_dir = env::var("HOME")
+            .unwrap_or_else(|_| env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string()));
         path.replacen("~", &home_dir, 1)
     } else {
         path.to_string()

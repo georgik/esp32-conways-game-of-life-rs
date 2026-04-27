@@ -18,6 +18,7 @@ use embedded_graphics_framebuf::{FrameBuf, backends::FrameBufferBackend};
 use embedded_hal::delay::DelayNs;
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::Blocking;
+use esp_hal::psram::Psram;
 use esp_hal::{
     delay::Delay,
     dma::{DmaRxBuf, DmaTxBuf},
@@ -320,7 +321,8 @@ fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
     // PSRAM allocator for heap memory.
-    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    let psram = Psram::new(peripherals.PSRAM, Default::default());
+    esp_alloc::psram_allocator!(&psram);
 
     init_logger_from_env();
 
@@ -354,11 +356,14 @@ fn main() -> ! {
     axp.set_dcdc3_on(true).unwrap();
 
     // Configure GPIO modes
-    axp.set_gpio1_mode(axp192::GpioMode12::NmosOpenDrainOutput).unwrap(); // LED
+    axp.set_gpio1_mode(axp192::GpioMode12::NmosOpenDrainOutput)
+        .unwrap(); // LED
     axp.set_gpio1_output(false).unwrap();
-    axp.set_gpio2_mode(axp192::GpioMode12::NmosOpenDrainOutput).unwrap(); // Speaker
+    axp.set_gpio2_mode(axp192::GpioMode12::NmosOpenDrainOutput)
+        .unwrap(); // Speaker
     axp.set_gpio2_output(true).unwrap();
-    axp.set_gpio4_mode(axp192::GpioMode34::NmosOpenDrainOutput).unwrap(); // LCD reset
+    axp.set_gpio4_mode(axp192::GpioMode34::NmosOpenDrainOutput)
+        .unwrap(); // LCD reset
 
     // LCD reset sequence via AXP192 GPIO4
     axp.set_gpio4_output(false).unwrap(); // Assert reset
@@ -375,14 +380,14 @@ fn main() -> ! {
     let spi = Spi::<Blocking>::new(
         peripherals.SPI2,
         esp_hal::spi::master::Config::default()
-            .with_frequency(Rate::from_mhz(60))  // Can go higher than CoreS3
+            .with_frequency(Rate::from_mhz(60)) // Can go higher than CoreS3
             .with_mode(esp_hal::spi::Mode::_0),
     )
     .unwrap()
     .with_sck(peripherals.GPIO18)
     .with_mosi(peripherals.GPIO23)
     .with_miso(peripherals.GPIO38)
-    .with_dma(peripherals.DMA_SPI2)  // ESP32 uses DMA_SPI2 instead of DMA_CH0!
+    .with_dma(peripherals.DMA_SPI2) // ESP32 uses DMA_SPI2 instead of DMA_CH0!
     .with_buffers(dma_rx_buf, dma_tx_buf);
     let cs_output = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
     let spi_delay = Delay::new();

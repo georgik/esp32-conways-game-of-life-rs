@@ -20,6 +20,8 @@ use embedded_graphics_framebuf::backends::FrameBufferBackend;
 // Embassy imports
 use embassy_executor::Spawner;
 use embassy_time::Duration;
+use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::timer::{AnyTimer, timg::TimerGroup};
 
 // ESP-HAL imports
 use esp_hal::clock::CpuClock::_240MHz;
@@ -33,12 +35,12 @@ use esp_hal::lcd_cam::{
         dpi::{Config, Dpi, Format, FrameTiming},
     },
 };
+use esp_hal::psram::Psram;
 use esp_hal::{
     Blocking,
     gpio::{Level, Output, OutputConfig},
     rng::Rng,
     time::Rate,
-    timer::{AnyTimer, timg::TimerGroup},
 };
 use esp_println::logger::init_logger_from_env;
 use log::{error, info};
@@ -330,7 +332,7 @@ async fn game_logic_task(
     let mut generation_count: usize = 0;
 
     // Initialize frame buffer with initial state
-    draw_grid(&mut frame_buf, &game_grid).unwrap();
+    draw_grid(&mut frame_buf, &game_grid);
 
     // Copy initial frame to DMA buffer
     let dst = dma_tx.as_mut_slice();
@@ -365,7 +367,7 @@ async fn game_logic_task(
         generation_count += 1;
 
         // Draw to framebuffer for next frame
-        draw_grid(&mut frame_buf, &game_grid).unwrap();
+        draw_grid(&mut frame_buf, &game_grid);
 
         // Copy framebuffer to DMA buffer for next transfer (while current DMA is happening)
         // This is the key optimization - overlap game computation with DMA transfer
@@ -393,13 +395,15 @@ async fn game_logic_task(
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(_240MHz));
-    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    let psram = Psram::new(peripherals.PSRAM, Default::default());
+    esp_alloc::psram_allocator!(&psram);
     init_logger_from_env();
 
     // Initialize Embassy timer
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     let timer0: AnyTimer = timg0.timer0.into();
-    esp_rtos::start(timer0);
+    let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timer0, sw_interrupt.software_interrupt0);
 
     info!("Starting ESP32-S3 LCD EV Board Embassy Conway's Game of Life");
 
@@ -414,8 +418,8 @@ async fn main(spawner: Spawner) -> ! {
 
     // Initialize the IO expander for controlling the display
     let mut expander = Tca9554::new(i2c);
-    expander.write_output_reg(0b1111_0011).unwrap();
-    expander.write_direction_reg(0b1111_0001).unwrap();
+    expander.write_output_reg(0b1111_0011);
+    expander.write_direction_reg(0b1111_0001);
 
     let delay = Delay::new();
     info!("Initializing display...");
@@ -427,7 +431,7 @@ async fn main(spawner: Spawner) -> ! {
         const SDA_BIT: u8 = 0b0000_1000;
 
         let mut output = 0b1111_0001 & !SCS_BIT;
-        expander.write_output_reg(output).unwrap();
+        expander.write_output_reg(output);
 
         for bit in core::iter::once(!is_cmd).chain((0..8).map(|i| (b >> i) & 0b1 != 0).rev()) {
             let prev = output;
@@ -437,24 +441,24 @@ async fn main(spawner: Spawner) -> ! {
                 output &= !SDA_BIT;
             }
             if prev != output {
-                expander.write_output_reg(output).unwrap();
+                expander.write_output_reg(output);
             }
 
             output &= !SCL_BIT;
-            expander.write_output_reg(output).unwrap();
+            expander.write_output_reg(output);
 
             output |= SCL_BIT;
-            expander.write_output_reg(output).unwrap();
+            expander.write_output_reg(output);
         }
 
         output &= !SCL_BIT;
-        expander.write_output_reg(output).unwrap();
+        expander.write_output_reg(output);
 
         output &= !SDA_BIT;
-        expander.write_output_reg(output).unwrap();
+        expander.write_output_reg(output);
 
         output |= SCS_BIT;
-        expander.write_output_reg(output).unwrap();
+        expander.write_output_reg(output);
     };
 
     // VSYNC must be high during initialization
@@ -552,15 +556,10 @@ async fn main(spawner: Spawner) -> ! {
     // Initialize RNG for game logic
     let rng = Rng::new();
 
-    // Spawn game logic task on main core (Core 0)
-    spawner
-        .spawn(game_logic_task(rng, dpi, dma_tx, frame_buf))
-        .unwrap();
+    // Spawn game logic task
+    spawner.spawn(game_logic_task(rng, dpi, dma_tx, frame_buf));
 
-    info!("Embassy Conway's Game of Life started successfully!");
-    info!("- Core 0: Running game logic computation and display updates");
-
-    // Main loop - should never exit
+    // Main loop
     loop {
         embassy_time::Timer::after(Duration::from_secs(10)).await;
         info!("Main loop heartbeat - Embassy system running");

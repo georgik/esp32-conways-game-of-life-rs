@@ -7,13 +7,13 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // use esp_bsp::prelude::*;
 // use esp_display_interface_spi_dma::display_interface_spi_dma;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    Drawable,
+    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb565,
     prelude::*,
     prelude::{DrawTarget, Point, RgbColor},
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
-    Drawable,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 #[allow(unused_imports)]
@@ -42,7 +42,7 @@ use core::fmt::Write;
 // use esp_hal::dma::Owner::Dma;
 use esp_hal::spi::Mode;
 use heapless::String;
-use mipidsi::{models::ILI9486Rgb565, Builder};
+use mipidsi::{Builder, models::ILI9486Rgb565};
 
 fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
@@ -225,10 +225,11 @@ fn main() -> ! {
 
     let mut display = Builder::new(ILI9486Rgb565, di)
         .reset_pin(reset)
-        .orientation(mipidsi::options::Orientation::new()
-                    .flip_vertical()
-                    .flip_horizontal()
-                )
+        .orientation(
+            mipidsi::options::Orientation::new()
+                .flip_vertical()
+                .flip_horizontal(),
+        )
         .init(&mut delay)
         .unwrap();
 
