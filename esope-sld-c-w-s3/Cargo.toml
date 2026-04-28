@@ -23,7 +23,7 @@ eeprom24x = "0.7.2"
 embassy-executor = "0.10.0"
 embassy-sync = "0.8"
 embassy-time = "0.5.1"
-esp-rtos = { version = "0.3.0", features = ["esp32s3", "embassy"] }
+esp-rtos = { version = "0.3.0", features = ["esp32s3", "embassy", "esp-alloc"] }
 static_cell = "2.1.1"
 heapless = "0.9.2"
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32s3"] }

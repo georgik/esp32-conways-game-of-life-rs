@@ -1,5 +1,5 @@
 use crate::modules::project::{ProjectInfo, TaskResult, TaskSummary};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::fs;
 
 pub async fn fix_corrupted_cargo_toml(
@@ -98,51 +98,6 @@ pub async fn scan_corrupted_files(projects: &[ProjectInfo]) -> Result<Vec<String
     }
 
     Ok(corrupted)
-}
-
-pub async fn fix_single_file(project_path: &std::path::Path) -> Result<bool> {
-    let cargo_toml_path = project_path.join("Cargo.toml");
-
-    let content = fs::read_to_string(&cargo_toml_path)
-        .context("Failed to read Cargo.toml")?;
-
-    let mut new_content = content.clone();
-    let mut changed = false;
-
-    // Fix corrupted patterns
-    if new_content.contains("\"\"") {
-        new_content = new_content
-            .replace(", \"\"", ",")
-            .replace("[ \"\"]", "[]")
-            .replace("[\"\"]", "[]")
-            .replace("\"\" ]", "]")
-            .replace("[ \"\"", "[")
-            .replace("[\"", "[");
-        changed = true;
-    }
-
-    // Clean up comma issues
-    if new_content.contains(", ,") || new_content.contains("[,") || new_content.contains(",]") {
-        new_content = new_content
-            .replace(", ,", ",")
-            .replace("[,", "[")
-            .replace(",]", "]");
-        changed = true;
-    }
-
-    // Clean up extra spaces
-    new_content = new_content
-        .replace("  ]", "]")
-        .replace("]  ", "]")
-        .replace("  ,", ",");
-
-    if changed {
-        fs::write(&cargo_toml_path, new_content)
-            .context("Failed to write Cargo.toml")?;
-        Ok(true)
-    } else {
-        Ok(false)
-    }
 }
 
 async fn fix_project_cargo_toml(

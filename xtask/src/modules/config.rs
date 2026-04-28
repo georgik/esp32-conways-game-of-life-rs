@@ -1,5 +1,5 @@
 use crate::modules::project::{ProjectInfo, TaskResult, TaskSummary};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::fs;
 
 pub async fn clean_deprecated_config(

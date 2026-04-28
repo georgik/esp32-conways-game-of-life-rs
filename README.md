@@ -13,7 +13,7 @@ Implementation of Conway's Game of Life Rust Bare Metal.
 
 ## Dependencies and Requirements
 
-This project uses ESP-HAL 1.1.0 for Rust bare-metal development on ESP32 microcontrollers. The examples support various ESP32 boards with different configurations including PSRAM, DMA, and display interfaces.
+This project uses ESP-HAL 1.1.0 for Rust bare-metal development on ESP32 microcontrollers. The examples support various ESP32 boards with different configurations including PSRAM, DMA, Embassy RTOS, and display interfaces.
 
 ### Toolchain Requirements
 
@@ -29,28 +29,6 @@ source ~/export-esp.sh
 ### Project Maintenance
 
 This repository includes a comprehensive Rust-based maintenance tool (xtask) for managing multiple ESP32 embedded projects. See the "Project Maintenance with xtask" section below for details on batch building, dependency updates, and code formatting across all examples.
-
-## Build Status
-
-**Current Status: 12/14 examples building successfully (86%)**
-
-Successfully building examples:
-- m5stack-core2 (ESP32)
-- waveshare-esp32-c6-lcd-1_47 (ESP32-C6 RISC-V)
-- esp32-c3-lcdkit (ESP32-C3)
-- esp32-s3-box-3 (ESP32-S3)
-- esp32-s3-box-3-minimal (ESP32-S3)
-- esp32-s3-lcd-ev-board (ESP32-S3)
-- esp32-wrover-kit (ESP32)
-- m5stack-cores3 (ESP32-S3)
-- waveshare-esp32-s3-touch-lcd-1_28 (ESP32-S3)
-- m5stack-atom-s3 (ESP32-S3)
-- m5stack-atom-s3r (ESP32-S3)
-- waveshare-esp32-s3-touch-amoled-1_8 (ESP32-S3)
-
-Projects requiring updates:
-- esope-sld-c-w-s3 (Embassy API migration in progress)
-- esp32-s3-lcd-ev-board-embassy (Embassy API migration in progress)
 
 ## Supported boards
 
@@ -319,11 +297,8 @@ cargo run --release
 Board: [SDL_C_W_S3](https://esope.de/en/products)
 Display: RGB [Schukat Smartwin display-concept](https://shop.schukat.com/de/de/EUR/c/ESOP)
 
-**Note:** This example requires manual Embassy API updates and is currently not building. The Embassy async framework integration for esp-hal 1.1.0 requires updating task spawning and initialization code. See the upgrade documentation for details.
-
-The implementation is based on Embassy Async Rust no_std with RGB interface.
-Both cores of ESP32-S3 are used. One core is handling DMA transfers to the display,
-while the other core is running the game logic.
+The implementation is based on Embassy Async Rust no_std with RGB interface using esp-rtos for Embassy RTOS integration.
+The display task handles DMA transfers while the game logic task updates the simulation state.
 
 RGB displays are very time-sensitive, so the timing of the display must be precise, that's also why
 one core is dedicated to the display.

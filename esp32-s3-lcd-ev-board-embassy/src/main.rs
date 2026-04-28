@@ -557,7 +557,7 @@ async fn main(spawner: Spawner) -> ! {
     let rng = Rng::new();
 
     // Spawn game logic task
-    spawner.spawn(game_logic_task(rng, dpi, dma_tx, frame_buf));
+    spawner.spawn(game_logic_task(rng, dpi, dma_tx, frame_buf).unwrap());
 
     // Main loop
     loop {

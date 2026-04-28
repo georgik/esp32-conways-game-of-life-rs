@@ -36,10 +36,8 @@ use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::I2c;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::Rng;
-use esp_hal::timer::{AnyTimer, timg::TimerGroup};
-use esp_rtos::embassy::Executor;
+use esp_hal::timer::timg::TimerGroup;
 use log::{error, info};
-use static_cell::StaticCell;
 
 // DMA line‐buffer for parallel RGB (1 descriptor, up to 4095 bytes each)
 use esp_hal::dma::{CHUNK_SIZE, DmaDescriptor, DmaTxBuf};
@@ -454,12 +452,8 @@ async fn main(spawner: Spawner) -> ! {
     PSRAM_READY.signal(());
 
     // Spawn tasks
-    spawner
-        .spawn(dma_display_task(dpi_for_display, dma_tx))
-        .unwrap();
-    spawner
-        .spawn(conway_task(psram_ptr, psram_len, rng_for_conway))
-        .unwrap();
+    spawner.spawn(dma_display_task(dpi_for_display, dma_tx).unwrap());
+    spawner.spawn(conway_task(psram_ptr, psram_len, rng_for_conway).unwrap());
 
     // Main loop
     loop {
