@@ -2,33 +2,23 @@
 name = "wasm-conways-game-of-life"
 version = "0.7.0"
 edition = "2024"
-default-run = "server"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
-
-[[bin]]
-name = "serve"
-path = "src/bin/serve.rs"
 
 [dependencies]
 wasm-bindgen = "0.2.100"
 web-sys = { version = "0.3", features = ["Window", "Document", "HtmlCanvasElement", "CanvasRenderingContext2d", "ImageData", "Performance"] }
 console_error_panic_hook = "0.1"
 log = "0.4"
-embedded-graphics = "0.8.1"
+embedded-graphics = "0.8.2"
 embedded-graphics-framebuf = "0.5.0"
-embedded-graphics-web-simulator = "0.4.0"
-bevy_ecs = { version = "0.17.2", default-features = false }
-heapless = "0.9.1"
+bevy_ecs = { version = "0.18.1", default-features = false }
+heapless = "0.9.2"
 console = "0.16.1"
 getrandom = { version = "0.3.4", features = ["wasm_js"]}
 rand_chacha = { version = "0.9.0", default-features = false }
 rand_core = "0.9.3"
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Dependencies for the server (only when not building for wasm)
-tiny_http = "0.12"
 
 #[package.metadata.wasm-pack]
 #wasm-opt = false

@@ -26,6 +26,13 @@ espup install --toolchain-version 1.85.0.0
 source ~/export-esp.sh
 ```
 
+### Software Versions
+
+- **Bevy ECS**: 0.18.1 (official release, used across all projects)
+- **esp-hal**: 1.1.0
+- **Rust Edition**: 2024
+- **Targets**: xtensa-esp32s3-none-elf, xtensa-esp32-none-elf, riscv32imc-unknown-none-elf, riscv32imac-unknown-none-elf, wasm32-wasi
+
 ### Project Maintenance
 
 This repository includes a comprehensive Rust-based maintenance tool (xtask) for managing multiple ESP32 embedded projects. See the "Project Maintenance with xtask" section below for details on batch building, dependency updates, and code formatting across all examples.
@@ -342,6 +349,31 @@ cargo run --release
 
 ---
 
+### WASM
+
+This project includes a WebAssembly (WASM) version that runs directly in your browser using pure Rust toolchain (no Python or Node.js dependencies).
+
+Build and serve WASM version:
+```bash
+# Build WASM package
+cargo xtask build-wasm
+
+# Build and serve on http://localhost:8000
+cargo xtask serve-wasm
+
+# Serve on custom port
+cargo xtask serve-wasm --port 3000
+```
+
+The WASM version uses:
+- **Bevy ECS 0.18.1** for game logic
+- **wasm-pack** for building
+- **miniserve** for serving (pure Rust HTTP server)
+
+First run will automatically install required tools (wasm-pack, miniserve).
+
+---
+
 ## Project Maintenance with xtask
 
 This repository includes a comprehensive **Rust-based maintenance tool** that replaces shell scripts for managing multiple ESP32 embedded projects.
@@ -424,6 +456,18 @@ cargo xtask all
 
 # Run all tasks, continue on failures
 cargo xtask all --keep-going
+```
+
+#### WASM Commands
+```bash
+# Build WASM package for web browser
+cargo xtask build-wasm
+
+# Build and serve WASM on http://localhost:8000
+cargo xtask serve-wasm
+
+# Serve on custom port
+cargo xtask serve-wasm --port 3000
 ```
 
 #### Fix Workspace Issues
