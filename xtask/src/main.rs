@@ -5,7 +5,7 @@ mod modules;
 
 use modules::{
     project::discover_projects,
-    build::{build_all_projects, format_all_projects},
+    build::{build_all_projects, format_all_projects, clippy_all_projects},
     update::update_dependencies,
     migrate::{search_pattern, migrate_psram_init},
     config::{clean_deprecated_config, fix_workspace_issues},
@@ -112,6 +112,11 @@ enum Commands {
         #[arg(long, short)]
         verbose: bool,
     },
+    /// Run clippy on all projects
+    Clippy {
+        #[arg(long, short)]
+        verbose: bool,
+    },
 }
 
 #[tokio::main]
@@ -172,6 +177,7 @@ async fn main() -> Result<()> {
         Commands::FixQuotes { dry_run, verbose } => {
             fix_cargo_toml_quotes(&projects, dry_run, verbose).await
         }
+        Commands::Clippy { verbose } => clippy_all_projects(&projects, verbose).await,
     }
 }
 
