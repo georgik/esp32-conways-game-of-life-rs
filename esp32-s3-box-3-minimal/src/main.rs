@@ -42,7 +42,7 @@ use core::fmt::Write;
 // use esp_hal::dma::Owner::Dma;
 use esp_hal::spi::Mode;
 use heapless::String;
-use mipidsi::{Builder, models::ILI9486Rgb565};
+use mipidsi::{Builder, models::ILI9488Rgb565};
 
 fn write_generation<D: DrawTarget<Color = Rgb565>>(
     display: &mut D,
@@ -223,7 +223,7 @@ fn main() -> ! {
         OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
     );
 
-    let mut display = Builder::new(ILI9486Rgb565, di)
+    let mut display = Builder::new(ILI9488Rgb565, di)
         .reset_pin(reset)
         .orientation(
             mipidsi::options::Orientation::new()
