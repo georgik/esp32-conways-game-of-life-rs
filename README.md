@@ -4,7 +4,9 @@ Implementation of Conway's Game of Life Rust Bare Metal.
 
 [![Wokwi](https://img.shields.io/endpoint?url=https%3A%2F%2Fwokwi.com%2Fbadge%2Fclick-to-simulate.json)](https://wokwi.com/projects/380370193649185793)
 
-![ESP32 Conways Game of Life in Rust](docs/esp32s3-game-of-life-rs.png)
+![ESP32 Conways Game of Life in Rust](docs/esp32-conways-game-of-life-rs.png)
+
+Note: For more complex Rust no_std example, check [Spooky Maze Game](https://github.com/georgik/esp32-spooky-maze-game/)
 
 ## Recommended Tools
 
@@ -13,7 +15,7 @@ Implementation of Conway's Game of Life Rust Bare Metal.
 
 ## Dependencies and Requirements
 
-This project uses ESP-HAL 1.1.0 for Rust bare-metal development on ESP32 microcontrollers. The examples support various ESP32 boards with different configurations including PSRAM, DMA, Embassy RTOS, and display interfaces.
+This project uses ESP-HAL for Rust bare-metal development on ESP32 microcontrollers. The examples support various ESP32 boards with different configurations including PSRAM, DMA, Embassy, and display interfaces.
 
 ### Toolchain Requirements
 
@@ -22,7 +24,7 @@ Most examples require the ESP Rust toolchain. For ESP32-S3 boards, use toolchain
 Install the toolchain:
 ```bash
 cargo install espup
-espup install --toolchain-version 1.85.0.0
+espup install
 source ~/export-esp.sh
 ```
 
@@ -32,10 +34,6 @@ source ~/export-esp.sh
 - **esp-hal**: 1.1.0
 - **Rust Edition**: 2024
 - **Targets**: xtensa-esp32s3-none-elf, xtensa-esp32-none-elf, riscv32imc-unknown-none-elf, riscv32imac-unknown-none-elf, wasm32-wasi
-
-### Project Maintenance
-
-This repository includes a comprehensive Rust-based maintenance tool (xtask) for managing multiple ESP32 embedded projects. See the "Project Maintenance with xtask" section below for details on batch building, dependency updates, and code formatting across all examples.
 
 ## Supported boards
 
@@ -538,6 +536,8 @@ This repository demonstrates multiple approaches to embedded Rust development:
 
 Each example is optimized for its specific hardware capabilities while maintaining consistent game logic across different platforms.
 
+
+
 ## Contributing
 
 When adding new board support or modifying existing examples:
@@ -547,6 +547,10 @@ When adding new board support or modifying existing examples:
 3. Include appropriate `[workspace]` section in Cargo.toml
 4. Test with `cargo xtask build` before committing
 5. Update this README with board-specific information
+
+### Project Maintenance
+
+This repository includes a comprehensive Rust-based maintenance tool (xtask) for managing multiple ESP32 embedded projects. See the "Project Maintenance with xtask" section below for details on batch building, dependency updates, and code formatting across all examples.
 
 ## License
 
