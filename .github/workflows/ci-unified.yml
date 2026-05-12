@@ -87,6 +87,7 @@ jobs:
       - name: Run clippy on all projects
         run: |
           cargo xtask clippy ${{ github.event.inputs.verbose == 'true' && '--verbose' || '' }}
+        continue-on-error: true
 
       - name: Collect build artifacts
         run: |

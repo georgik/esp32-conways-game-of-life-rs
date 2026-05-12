@@ -131,7 +131,7 @@ const DISPLAY_SIZE: DisplaySize = DisplaySize::new(368, 448);
 const FB_SIZE: usize = framebuffer_size(DISPLAY_SIZE, ColorMode::Rgb888);
 
 // Type alias for the display driver
-type DisplayDriver = Sh8601Driver<Ws18AmoledDriver, ResetDriver<I2c<'static, Blocking>>>;
+type DisplayDriver = Sh8601Driver<Ws18AmoledDriver, ResetDriver<I2c<'static, Blocking>>, Rgb888>;
 
 // Conway's Game of Life grid configuration
 const GRID_WIDTH: usize = 52; // 368 / 7 ≈ 52

@@ -10,12 +10,12 @@ use alloc::boxed::Box;
 use bevy_ecs::prelude::*;
 use core::fmt::Write;
 use embedded_graphics::{
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    Drawable,
+    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb565,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
-    Drawable,
 };
 use embedded_graphics_framebuf::FrameBuf;
 use embedded_hal::delay::DelayNs;
@@ -23,22 +23,23 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
+use esp_hal::psram::Psram;
 use esp_hal::{
+    Blocking,
     gpio::{Level, Output, OutputConfig},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
     time::Rate,
-    Blocking,
 };
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
 use mipidsi::options::Rotation;
+use mipidsi::{Builder, models::ILI9341Rgb565};
 use mipidsi::{
     interface::SpiInterface,
     options::{ColorOrder, Orientation},
 };
-use mipidsi::{models::ILI9341Rgb565, Builder};
 // includes NonSend and NonSendMut
 
 #[panic_handler]
@@ -188,7 +189,7 @@ fn age_to_color(age: u8) -> Rgb565 {
         let r = ((31 * a) + 5) / max_age as u32;
         let g = ((63 * a) + 5) / max_age as u32;
         let b = 31; // Keep blue channel constant
-                    // Convert back to u8 and return the color.
+        // Convert back to u8 and return the color.
         Rgb565::new(r as u8, g as u8, b)
     }
 }
@@ -329,7 +330,8 @@ fn main() -> ! {
 
     // PSRAM allocator for heap memory.
     // Note: Placing framebuffer into PSRAM might result into slower redraw.
-    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    let psram = Psram::new(peripherals.PSRAM, Default::default());
+    esp_alloc::psram_allocator!(&psram);
     // esp_alloc::heap_allocator!(size: 130 * 1024);
 
     init_logger_from_env();

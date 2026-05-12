@@ -6,6 +6,7 @@ use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use alloc::vec;
 use core::cell::RefCell;
 use core::fmt::Write;
 
@@ -18,7 +19,7 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
 };
-use embedded_graphics_framebuf::FrameBuf;
+use embedded_graphics_framebuf::{FrameBuf, backends::FrameBufferBackend};
 extern crate getrandom;
 use log::info;
 use wasm_bindgen::JsCast;
@@ -26,14 +27,54 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData, window};
 
 // === LCD & Framebuffer settings ===
-const LCD_H_RES: usize = 320;
-const LCD_V_RES: usize = 240;
+// Use smaller resolution for WASM to avoid memory issues
+const LCD_H_RES: usize = 160;
+const LCD_V_RES: usize = 120;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
 
 // We store pixels as Rgb565.
-pub type FbBuffer = [Rgb565; LCD_BUFFER_SIZE];
+pub type FbBuffer = HeapBuffer<Rgb565>;
 // Type alias for our framebuffer.
 pub type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
+
+// We store pixels as Rgb565 in a Vec for heap allocation.
+pub struct HeapBuffer<Rgb565> {
+    data: Vec<Rgb565>,
+}
+
+impl HeapBuffer<Rgb565> {
+    pub fn new(data: Vec<Rgb565>) -> Self {
+        Self { data }
+    }
+}
+
+impl core::ops::Deref for HeapBuffer<Rgb565> {
+    type Target = [Rgb565];
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl core::ops::DerefMut for HeapBuffer<Rgb565> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
+impl FrameBufferBackend for HeapBuffer<Rgb565> {
+    type Color = Rgb565;
+    fn set(&mut self, index: usize, color: Self::Color) {
+        if index < self.data.len() {
+            self.data[index] = color;
+        }
+    }
+    fn get(&self, index: usize) -> Self::Color {
+        self.data.get(index).copied().unwrap_or(Rgb565::BLACK)
+    }
+    fn nr_elements(&self) -> usize {
+        self.data.len()
+    }
+}
 
 // === FrameBuffer Resource ===
 #[derive(Resource)]
@@ -43,9 +84,10 @@ struct FrameBufferResource {
 
 impl FrameBufferResource {
     fn new() -> Self {
-        // Allocate framebuffer data on the heap.
-        let fb_data: FbBuffer = *Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
-        let frame_buf = MyFrameBuf::new(fb_data, LCD_H_RES, LCD_V_RES);
+        // Allocate framebuffer data on the heap using Vec.
+        let fb_data = vec![Rgb565::BLACK; LCD_BUFFER_SIZE];
+        let heap_buffer = HeapBuffer::new(fb_data);
+        let frame_buf = MyFrameBuf::new(heap_buffer, LCD_H_RES, LCD_V_RES);
         Self { frame_buf }
     }
 }
@@ -230,7 +272,7 @@ fn render_system(
 
     // Overlay centered text.
     let line1 = "Rust no_std WASM";
-    let line2 = "Bevy ECS 0.17";
+    let line2 = "Bevy ECS";
     let line1_width = line1.len() as i32 * 8;
     let line2_width = line2.len() as i32 * 8;
     let x1 = (LCD_H_RES as i32 - line1_width) / 2;

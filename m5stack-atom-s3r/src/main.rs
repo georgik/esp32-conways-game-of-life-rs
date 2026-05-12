@@ -24,6 +24,7 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::delay::Delay;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
 use esp_hal::dma_buffers;
+use esp_hal::psram::Psram;
 use esp_hal::{
     Blocking,
     gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull},
@@ -412,7 +413,8 @@ fn render_system(
 fn main() -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default());
 
-    // esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    let psram = Psram::new(peripherals.PSRAM, Default::default());
+    esp_alloc::psram_allocator!(&psram);
     esp_alloc::heap_allocator!(size: 150 * 1024);
 
     init_logger_from_env();

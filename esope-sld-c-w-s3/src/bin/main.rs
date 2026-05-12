@@ -34,18 +34,14 @@ use embassy_sync::signal::Signal;
 use embassy_time::Ticker;
 use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::I2c;
+use esp_hal::interrupt::software::SoftwareInterruptControl;
 use esp_hal::rng::Rng;
-use esp_hal::system::Stack;
-use esp_hal::timer::{AnyTimer, timg::TimerGroup};
-use esp_rtos::embassy::Executor;
+use esp_hal::timer::timg::TimerGroup;
 use log::{error, info};
-use static_cell::StaticCell;
 
 // DMA line‐buffer for parallel RGB (1 descriptor, up to 4095 bytes each)
 use esp_hal::dma::{CHUNK_SIZE, DmaDescriptor, DmaTxBuf};
 use esp_println::println;
-
-use esp_hal::interrupt::software::SoftwareInterruptControl;
 
 // Add ESP-IDF app descriptor for bootloader compatibility
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -227,26 +223,27 @@ const LCD_H_RES_USIZE: usize = 320;
 const LCD_V_RES_USIZE: usize = 240;
 const LCD_BUFFER_SIZE: usize = LCD_H_RES_USIZE * LCD_V_RES_USIZE;
 
-// Embassy multicore: allocate app core stack
-static APP_CORE_STACK: StaticCell<Stack<8192>> = StaticCell::new();
-
-// PSRAM synchronization signals
-static PSRAM_READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static mut PSRAM_BUF_PTR: *mut u8 = core::ptr::null_mut();
 static mut PSRAM_BUF_LEN: usize = 0;
+
+// Embassy synchronization signal
+static PSRAM_READY: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // Initialize Embassy timer for esp-rtos (Xtensa devices use single timer)
+    // Initialize Embassy timer
     let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let timer0: AnyTimer = timg0.timer0.into();
-    esp_rtos::start(timer0);
+    let sw_interrupt = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
+    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
+
     println!("Starting up...");
     esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
     println!("PSRAM allocator initialized");
+
+    init_logger_from_env();
 
     init_logger_from_env();
     // esp_alloc::heap_allocator!(size: 72 * 1024);
@@ -444,52 +441,21 @@ async fn main(spawner: Spawner) -> ! {
         .unwrap()
     };
 
-    // Split peripherals for multicore usage
+    // Split peripherals for task usage
     let (dpi_for_display, rng_for_conway) = (dpi, rng_for_app);
-
-    // Signal that PSRAM is ready
-    PSRAM_READY.signal(());
-
-    // Initialize software interrupts for multicore support
-    let sw_ints = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-
-    // Start app core with esp-rtos
-    let app_core_stack = APP_CORE_STACK.init(Stack::new());
-    esp_rtos::start_second_core(
-        peripherals.CPU_CTRL,
-        sw_ints.software_interrupt0,
-        sw_ints.software_interrupt1,
-        app_core_stack,
-        move || {
-            static EXECUTOR: StaticCell<Executor> = StaticCell::new();
-            let executor = EXECUTOR.init(Executor::new());
-            executor.run(|spawner| {
-                spawner
-                    .spawn(dma_display_task(dpi_for_display, dma_tx))
-                    .ok();
-            });
-        },
-    );
-
-    // Main core: Run Conway task
-    // Wait until PSRAM is ready
-    loop {
-        if PSRAM_READY.try_take().is_some() {
-            break;
-        }
-        core::hint::spin_loop();
-    }
 
     // SAFETY: PSRAM_BUF_PTR and PSRAM_BUF_LEN are published before
     let psram_ptr = unsafe { PSRAM_BUF_PTR };
     let psram_len = unsafe { PSRAM_BUF_LEN };
 
-    // Spawn Conway task on main core
-    spawner
-        .spawn(conway_task(psram_ptr, psram_len, rng_for_conway))
-        .unwrap();
+    // Signal PSRAM ready
+    PSRAM_READY.signal(());
 
-    // Main loop - this should never exit
+    // Spawn tasks
+    spawner.spawn(dma_display_task(dpi_for_display, dma_tx).unwrap());
+    spawner.spawn(conway_task(psram_ptr, psram_len, rng_for_conway).unwrap());
+
+    // Main loop
     loop {
         embassy_time::Timer::after(embassy_time::Duration::from_secs(1)).await;
     }
@@ -525,6 +491,9 @@ async fn dma_display_task(mut dpi: Dpi<'static, esp_hal::Blocking>, mut dma_tx: 
 // Conway update task running on core 0
 #[embassy_executor::task]
 async fn conway_task(psram_ptr: *mut u8, _psram_len: usize, mut rng: Rng) {
+    // Wait until PSRAM is ready
+    PSRAM_READY.wait().await;
+
     // SAFETY: The pointer is valid and initialized before this task starts
     let fb: &mut [Rgb565; LCD_BUFFER_SIZE] =
         unsafe { &mut *(psram_ptr as *mut [Rgb565; LCD_BUFFER_SIZE]) };

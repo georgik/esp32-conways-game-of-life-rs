@@ -4,7 +4,6 @@ runner = "espflash flash --monitor --chip esp32s3 --before default-reset --after
 [env]
 ESP_LOG="INFO"
 ESP_WIFI_CONFIG_PHY_ENABLE_USB="true"
-ESP_HAL_CONFIG_PSRAM_MODE = "octal"
 
 [build]
 rustflags = [

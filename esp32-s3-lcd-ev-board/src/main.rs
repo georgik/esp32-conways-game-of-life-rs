@@ -26,6 +26,7 @@ use esp_hal::lcd_cam::{
         dpi::{Config, Dpi, Format, FrameTiming},
     },
 };
+use esp_hal::psram::Psram;
 use esp_hal::{
     Blocking,
     gpio::{Level, Output, OutputConfig},
@@ -366,7 +367,8 @@ static mut TX_DESCRIPTORS: [DmaDescriptor; NUM_DMA_DESC] = [DmaDescriptor::EMPTY
 fn main() -> ! {
     let peripherals: Peripherals =
         esp_hal::init(esp_hal::Config::default().with_cpu_clock(_240MHz));
-    esp_alloc::psram_allocator!(peripherals.PSRAM, esp_hal::psram);
+    let psram = Psram::new(peripherals.PSRAM, Default::default());
+    esp_alloc::psram_allocator!(&psram);
     init_logger_from_env();
 
     // Setup I2C for the TCA9554 IO expander
