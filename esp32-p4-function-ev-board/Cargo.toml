@@ -11,16 +11,12 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 
 esp-hal = {
-    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-hal",
     git = "https://github.com/esp-rs/esp-hal.git",
-
     features = ["esp32p4", "unstable"]
 }
 
 esp-backtrace = {
-    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-backtrace",
     git = "https://github.com/esp-rs/esp-hal.git",
-
     features = [
         "panic-handler",
         "println",
@@ -28,9 +24,7 @@ esp-backtrace = {
 ] }
 
 esp-println = {
-    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-println",
     git = "https://github.com/esp-rs/esp-hal.git",
-    
     #default-features = false,
     features = ["esp32p4", "log-04"]
 }
@@ -38,28 +32,13 @@ log = { version = "0.4.29" }
 
 
 esp-bootloader-esp-idf = {
-    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-bootloader-esp-idf",
     git = "https://github.com/esp-rs/esp-hal.git",
-
     features = ["esp32p4"]
 }
 
-#embassy-executor = { version = "0.10.0", features = [] }
-#embassy-time     = "0.5.0"
+embedded-graphics = "0.8.2"
+heapless = "0.9.2"
 
-#critical-section = "1.2.0"
-#static_cell      = "2.1.1"
-
-####################################graphics####################
-embedded-hal-bus = "0.3.0"
-embedded-graphics = "0.8.1"
-mipidsi = "0.9.0"
-static_cell = "2.1.1"
-
-mousefood = { git = "https://github.com/j-g00da/mousefood", rev = "cc9f8fe372f09342537bc31a1355f77f2693d70b", default-features = false, features = [
-  "fonts",
-] }
-ratatui = { version = "0.30.0-alpha.5", default-features = false }
 esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", default-features = false, features = ["esp32p4","global-allocator"]}
 
 
