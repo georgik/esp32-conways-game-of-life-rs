@@ -9,27 +9,72 @@ license = "MIT OR Apache-2.0"
 [workspace]
 
 [dependencies]
-esp-hal = { git = "https://github.com/esp-rs/esp-hal.git", features = ["esp32p4", "unstable"] }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal.git", features = [
-    "panic-handler",
-    "println",
-    "esp32p4",
+
+esp-hal = {
+    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-hal",
+    git = "https://github.com/esp-rs/esp-hal.git",
+
+    features = ["esp32p4", "unstable"]
+}
+
+esp-backtrace = {
+    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-backtrace",
+    git = "https://github.com/esp-rs/esp-hal.git",
+
+    features = [
+        "panic-handler",
+        "println",
+        "esp32p4"
 ] }
-esp-println = { git = "https://github.com/esp-rs/esp-hal.git", features = [ "esp32p4", "log-04" ] }
+
+esp-println = {
+    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-println",
+    git = "https://github.com/esp-rs/esp-hal.git",
+    
+    #default-features = false,
+    features = ["esp32p4", "log-04"]
+}
 log = { version = "0.4.29" }
 
-esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", features = ["esp32p4"] }
-embedded-graphics = "0.8.2"
-embedded-hal = "1.0.0"
-mipidsi = "0.10.0"
-#esp-display-interface-spi-dma = "0.3.0"
-esp-display-interface-spi-dma = { path = "../esp-display-interface-spi-dma"} #SSSSSSSSSSSSSSSSSS
-esp-bsp = "0.4.1" #SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS
-embedded-graphics-framebuf = "0.5.0"
-heapless = "0.9.2"
+
+esp-bootloader-esp-idf = {
+    # path = "C:/Users/MatejOndracek/Desktop/P4-display/custom/esp-hal/esp-bootloader-esp-idf",
+    git = "https://github.com/esp-rs/esp-hal.git",
+
+    features = ["esp32p4"]
+}
+
+#embassy-executor = { version = "0.10.0", features = [] }
+#embassy-time     = "0.5.0"
+
+#critical-section = "1.2.0"
+#static_cell      = "2.1.1"
+
+####################################graphics####################
 embedded-hal-bus = "0.3.0"
-bevy_ecs = { version = "0.18.1", default-features = false }
-esp-bootloader-esp-idf = { git = "https://github.com/esp-rs/esp-hal.git", features = ["esp32p4"] }
+embedded-graphics = "0.8.1"
+mipidsi = "0.9.0"
+static_cell = "2.1.1"
+
+mousefood = { git = "https://github.com/j-g00da/mousefood", rev = "cc9f8fe372f09342537bc31a1355f77f2693d70b", default-features = false, features = [
+  "fonts",
+] }
+ratatui = { version = "0.30.0-alpha.5", default-features = false }
+esp-alloc = { git = "https://github.com/esp-rs/esp-hal.git", default-features = false, features = ["esp32p4","global-allocator"]}
+
+
+# For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.dev]
+# The default debug profile is too slow and too big for resource-constrained devices.
+# Always build with some optimizations enabled.
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1     # LLVM can perform better optimizations using a single thread
+debug         = 2     # prefer slower builds but better debugging experience
+lto           = 'fat'
+opt-level     = 's'
+
 
 [features]
 default = [ "esp-hal/esp32p4" ]

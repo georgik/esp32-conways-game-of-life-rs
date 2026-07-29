@@ -1,419 +1,421 @@
+//! Drives the EK79007 MIPI-DSI panel on the ESP32-P4-Function-EV-Board v1.5.
+//!
+//! Cycles through a smooth RGB colour wheel one frame per vsync.
+//!
+//! Board wiring (fixed, no external GPIOs needed):
+//! - LCD RST     => GPIO27
+//! - LCD BL PWM  => GPIO26  (driven high = backlight on)
+//! - MIPI-DSI    => internal (no GPIO mux)
+//! - VDD_MIPI_DPHY powered by the driver via PMU LDO3
+
+//% CHIP_FILTER: mipi_dsi_driver_supported
+
 #![no_std]
 #![no_main]
 
+
+const H_ACTIVE: u32 = 1024;
+const V_ACTIVE: u32 = 600;
+
+const BYTES_PER_PIXEL: usize = 2;
+const FB_SIZE: usize =
+    H_ACTIVE as usize * V_ACTIVE as usize * BYTES_PER_PIXEL;
+
+
+//GAME constants
+const GRID_WIDTH: usize = 85;
+const GRID_HEIGHT: usize = 50;
+
+const CELL_SIZE: usize = 12;
+const CELL_INSET: usize = 1;
+
+const RESET_AFTER_GENERATIONS: usize = 300;
+const FRAME_DELAY_MS: u32 = 100;
+
+type GameGrid = [[u8; GRID_WIDTH]; GRID_HEIGHT];
+
+
+
+
 extern crate alloc;
 
-// ESP-IDF App Descriptor required by newer espflash
+use core::alloc::Layout;
 
-esp_bootloader_esp_idf::esp_app_desc!();
-use alloc::boxed::Box;
+use esp_alloc as _;
+use esp_backtrace as _;
 
-use bevy_ecs::prelude::*;
-use core::fmt::Write;
-use embedded_graphics::{
-    Drawable,
-    mono_font::{MonoTextStyle, ascii::FONT_8X13},
-    pixelcolor::Rgb565,
-    prelude::*,
-    primitives::{PrimitiveStyle, Rectangle},
-    text::Text,
-};
-use embedded_graphics_framebuf::FrameBuf;
-use embedded_hal::delay::DelayNs;
-use embedded_hal_bus::spi::ExclusiveDevice;
-use esp_hal::delay::Delay;
-use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
-use esp_hal::dma_buffers;
+use esp_println::println;
+
+
+
 use esp_hal::{
-    Blocking,
+    clock::{
+        CpuClock,
+        ll::{MipiDsiPhyPllRefclkConfig, MipiDsiPhyPllRefclkSclk},
+    },
+    delay::Delay,
     gpio::{Level, Output, OutputConfig},
     main,
-    rng::Rng,
-    spi::master::{Spi, SpiDmaBus},
-    time::Rate,
+    mipi_dsi::{
+        Config,
+        DataLanes,
+        MipiDsi,
+        dpi::{ColorFormat, DpiClockSource, DpiConfig, FrameTiming},
+    },
+    peripherals::Peripherals,
+    psram,
 };
-use esp_println::{logger::init_logger_from_env, println};
-use log::info;
-use mipidsi::{Builder, models::ST7789};
-use mipidsi::{interface::SpiInterface, options::ColorInversion}; // includes NonSend and NonSendMut
 
-#[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
-    println!("Panic: {}", _info);
-    loop {}
+
+esp_bootloader_esp_idf::esp_app_desc!();
+
+
+#[main]
+fn main() -> ! {
+
+    esp_println::logger::init_logger_from_env();
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals: Peripherals = esp_hal::init(config);
+
+    esp_alloc::psram_allocator!(
+        peripherals.PSRAM,
+        esp_hal::psram,
+        psram::PsramConfig::default()
+    );
+
+    println!("PSRAM ready");
+
+    let delay = Delay::new();
+
+   // ── LCD reset (GPIO27, active-low) ──────────────────────────────────────
+    let mut lcd_rst = Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default());
+    delay.delay_millis(10);
+    lcd_rst.set_high();
+    delay.delay_millis(120);
+
+    // ── Backlight on (GPIO26, active-high) ─────────────────────────────────
+    let _lcd_bl = Output::new(peripherals.GPIO26, Level::High, OutputConfig::default());
+
+    // ── MIPI DSI bus ────────────────────────────────────────────────────────
+    let mut bus = MipiDsi::new(
+        peripherals.MIPI_DSI,
+        peripherals.VDMA_CH0,
+        Config::default()
+            .with_num_data_lanes(DataLanes::_2)
+            .with_lane_bit_rate_mbps(1000.0)
+            .with_phy_pll_refclk(MipiDsiPhyPllRefclkConfig::new(
+                MipiDsiPhyPllRefclkSclk::Xtal,
+                0,
+            ))
+            .with_force_clock_lane_hs(false),
+    )
+    .expect("MipiDsi init failed");
+
+    println!("DSI bus up");
+
+    // ── EK79007 init via DBI (LP command mode) ──────────────────────────────
+    {
+        let mut dbi = bus.dbi(0);
+        for &(cmd, params) in EK79007_INIT {
+            dbi.write_cmd(cmd, params).unwrap();
+        }
+        // Sleep out: 120 ms settle time.
+        dbi.write_cmd(0x11, &[]).unwrap();
+        delay.delay_millis(120);
+        // Display on.
+        dbi.write_cmd(0x29, &[]).unwrap();
+        delay.delay_millis(20);
+    }
+
+    println!("Panel init done");
+
+    // ── Frame buffer in PSRAM (64-byte aligned) ─────────────────────────────
+    let layout = Layout::from_size_align(FB_SIZE, 64).unwrap();
+    let fb_ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    assert!(!fb_ptr.is_null(), "PSRAM alloc failed");
+    let fb1: &'static mut [u8] = unsafe { core::slice::from_raw_parts_mut(fb_ptr, FB_SIZE) };
+
+    let fb_ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
+    assert!(!fb_ptr.is_null(), "PSRAM alloc failed");
+    let fb2: &'static mut [u8] = unsafe { core::slice::from_raw_parts_mut(fb_ptr, FB_SIZE) };
+    let fbs: [&mut [u8]; 2] = [fb1, fb2];
+
+    // ── Enter video mode (DPI) ──────────────────────────────────────────────
+    let dpi_cfg = DpiConfig {
+        virtual_channel: 0,
+        pixel_clock_mhz: 48.0,
+        dpi_clk_src: DpiClockSource::PllF240m,
+        in_color_format: ColorFormat::Rgb565,
+        out_color_format: ColorFormat::Rgb565,
+        timing: FrameTiming {
+            h_active: H_ACTIVE,
+            hsw: 10,
+            hbp: 120,
+            hfp: 120,
+            v_active: V_ACTIVE,
+            vsw: 1,
+            vbp: 20,
+            vfp: 20,
+        },
+    };
+
+    let mut dpi = bus.dpi(dpi_cfg, &fbs).expect("DPI init failed");
+
+    println!("Streaming");
+
+    // ── MAIN GAME LOOP ───────────────────────────────────────────────────
+
+let mut rng = XorShift32::new(0xA5C3_91E7);
+
+let mut grid: GameGrid = [[0; GRID_WIDTH]; GRID_HEIGHT];
+let mut next_grid: GameGrid = [[0; GRID_WIDTH]; GRID_HEIGHT];
+
+randomize_grid(&mut rng, &mut grid);
+
+// Add a glider near the center.
+let glider_x = GRID_WIDTH / 2;
+let glider_y = GRID_HEIGHT / 2;
+
+let glider = [
+    (1usize, 0usize),
+    (2, 1),
+    (0, 2),
+    (1, 2),
+    (2, 2),
+];
+
+for &(x, y) in &glider {
+    grid[glider_y + y][glider_x + x] = 1;
 }
-/*
-// --- Type Alias for the Concrete Display ---
-// Use the DMA-enabled SPI bus type.
-type MyDisplay = mipidsi::Display<
-SpiInterface<
-'static,
-ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
-Output<'static>,
->,
-ST7789,
-Output<'static>,
->;
-*/
 
-// --- LCD Resolution and FrameBuffer Type Aliases ---
-const LCD_H_RES: usize = 206;
-const LCD_V_RES: usize = 320;
-const LCD_BUFFER_SIZE: usize = LCD_H_RES * LCD_V_RES;
+let mut generation: usize = 0;
 
-use embedded_graphics::pixelcolor::PixelColor;
-use embedded_graphics_framebuf::backends::FrameBufferBackend;
+println!("Starting Conway's Game of Life");
 
-/// A wrapper around a boxed array that implements FrameBufferBackend.
-/// This allows the framebuffer to be allocated on the heap.
-pub struct HeapBuffer<C: PixelColor, const N: usize>(Box<[C; N]>);
+loop {
+    // Wait until vertical blanking before modifying the back buffer.
+    dpi.wait_for_vsync();
 
-impl<C: PixelColor, const N: usize> HeapBuffer<C, N> {
-    pub fn new(data: Box<[C; N]>) -> Self {
-        Self(data)
+    // Draw into the currently unused framebuffer.
+    let back = dpi.framebuffer_mut();
+    draw_game(back, &grid);
+
+    // Flush the PSRAM cache and switch the DMA to this framebuffer.
+    dpi.commit();
+
+    if generation % 25 == 0 {
+        println!("Generation: {generation}");
+    }
+
+    // Limit the simulation to approximately ten generations per second.
+    delay.delay_millis(FRAME_DELAY_MS);
+
+    update_game_of_life(&mut grid, &mut next_grid);
+    generation += 1;
+
+    if generation >= RESET_AFTER_GENERATIONS {
+        println!("Randomizing grid");
+
+        randomize_grid(&mut rng, &mut grid);
+        next_grid = [[0; GRID_WIDTH]; GRID_HEIGHT];
+        generation = 0;
+    }
+}
+}
+
+// ── Colour wheel ──────────────────────────────────────────────────────────────
+
+/// Convert a hue value (0–359°) to a packed RGB565 value.
+
+// ── EK79007 vendor init sequence ─────────────────────────────────────────────
+
+static EK79007_INIT: &[(u8, &[u8])] = &[
+    (0xB2, &[0x10]), // Pad control - two lanes
+    (0x80, &[0x8B]),
+    (0x81, &[0x78]),
+    (0x82, &[0x84]),
+    (0x83, &[0x88]),
+    (0x84, &[0xA8]),
+    (0x85, &[0xE3]),
+    (0x86, &[0x88]),
+];
+
+struct XorShift32 {
+    state: u32,
+}
+
+impl XorShift32 {
+    fn new(seed: u32) -> Self {
+        Self {
+            state: if seed == 0 { 0x1234_5678 } else { seed },
+        }
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        let mut x = self.state;
+
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+
+        self.state = x;
+        x
     }
 }
 
-impl<C: PixelColor, const N: usize> core::ops::Deref for HeapBuffer<C, N> {
-    type Target = [C; N];
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<C: PixelColor, const N: usize> core::ops::DerefMut for HeapBuffer<C, N> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl<C: PixelColor, const N: usize> FrameBufferBackend for HeapBuffer<C, N> {
-    type Color = C;
-    fn set(&mut self, index: usize, color: Self::Color) {
-        self.0[index] = color;
-    }
-    fn get(&self, index: usize) -> Self::Color {
-        self.0[index]
-    }
-    fn nr_elements(&self) -> usize {
-        N
-    }
-}
-
-// We want our pixels stored as Rgb565.
-type FbBuffer = HeapBuffer<Rgb565, LCD_BUFFER_SIZE>;
-// Define a type alias for the complete FrameBuf.
-type MyFrameBuf = FrameBuf<Rgb565, FbBuffer>;
-
-#[derive(Resource)]
-struct FrameBufferResource {
-    frame_buf: MyFrameBuf,
-}
-
-impl FrameBufferResource {
-    fn new() -> Self {
-        // Allocate the framebuffer data on the heap.
-        let fb_data: Box<[Rgb565; LCD_BUFFER_SIZE]> = Box::new([Rgb565::BLACK; LCD_BUFFER_SIZE]);
-        let heap_buffer = HeapBuffer::new(fb_data);
-        let frame_buf = MyFrameBuf::new(heap_buffer, LCD_H_RES, LCD_V_RES);
-        Self { frame_buf }
-    }
-}
-
-// --- Game of Life Definitions ---
-// Now each cell is a u8 (0 means dead; >0 indicates age)
-const GRID_WIDTH: usize = 64;
-const GRID_HEIGHT: usize = 48;
-const RESET_AFTER_GENERATIONS: usize = 500;
-
-fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
+fn randomize_grid(rng: &mut XorShift32, grid: &mut GameGrid) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
-            let mut buf = [0u8; 1];
-            rng.read(&mut buf);
-            // Randomly set cell to 1 (alive) or 0 (dead)
-            *cell = if buf[0] & 1 != 0 { 1 } else { 0 };
+            // Approximately 25% of the cells start alive.
+            *cell = if rng.next_u32() & 3 == 0 {
+                1
+            } else {
+                0
+            };
         }
     }
 }
 
-fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
-    let mut new_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
+fn update_game_of_life(grid: &mut GameGrid, next: &mut GameGrid) {
     for y in 0..GRID_HEIGHT {
         for x in 0..GRID_WIDTH {
-            // Count neighbors: consider a cell alive if its age is >0.
-            let mut alive_neighbors = 0;
-            for i in 0..3 {
-                for j in 0..3 {
-                    if i == 1 && j == 1 {
+            let mut alive_neighbors = 0u8;
+
+            for dy in 0..3 {
+                for dx in 0..3 {
+                    if dx == 1 && dy == 1 {
                         continue;
                     }
-                    let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
-                    let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
+
+                    // Wrap around at the edges.
+                    let nx = (x + dx + GRID_WIDTH - 1) % GRID_WIDTH;
+                    let ny = (y + dy + GRID_HEIGHT - 1) % GRID_HEIGHT;
+
                     if grid[ny][nx] > 0 {
                         alive_neighbors += 1;
                     }
                 }
             }
-            if grid[y][x] > 0 {
-                // Live cell survives if 2 or 3 neighbors; increment age.
+
+            next[y][x] = if grid[y][x] > 0 {
                 if alive_neighbors == 2 || alive_neighbors == 3 {
-                    new_grid[y][x] = grid[y][x].saturating_add(1);
+                    // Cell survives and becomes older.
+                    grid[y][x].saturating_add(1)
                 } else {
-                    new_grid[y][x] = 0;
+                    // Cell dies.
+                    0
                 }
+            } else if alive_neighbors == 3 {
+                // New cell is born.
+                1
             } else {
-                // Dead cell becomes alive if exactly 3 neighbors.
-                if alive_neighbors == 3 {
-                    new_grid[y][x] = 1;
-                } else {
-                    new_grid[y][x] = 0;
-                }
-            }
+                0
+            };
         }
     }
-    *grid = new_grid;
+
+    core::mem::swap(grid, next);
 }
 
-/// Maps cell age (1...=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
-fn age_to_color(age: u8) -> Rgb565 {
+fn rgb565(r: u8, g: u8, b: u8) -> u16 {
+    let r5 = (r as u16 >> 3) & 0x1f;
+    let g6 = (g as u16 >> 2) & 0x3f;
+    let b5 = (b as u16 >> 3) & 0x1f;
+
+    (r5 << 11) | (g6 << 5) | b5
+}
+
+/// Convert cell age into an RGB565 color.
+///
+/// New cells start blue. Older cells gradually become brighter and
+/// eventually approach white.
+fn age_to_color(age: u8) -> u16 {
     if age == 0 {
-        Rgb565::BLACK
-    } else {
-        let max_age = 10;
-        let a = age.min(max_age) as u32; // clamp age and use u32 for intermediate math
-        let r = ((31 * a) + 5) / max_age as u32;
-        let g = ((63 * a) + 5) / max_age as u32;
-        let b = 31; // Keep blue channel constant
-        // Convert back to u8 and return the color.
-        Rgb565::new(r as u8, g as u8, b)
+        return rgb565(0, 0, 0);
+    }
+
+    const MAX_AGE: u32 = 10;
+
+    let age = u32::from(age).min(MAX_AGE);
+
+    let red = (255 * age / MAX_AGE) as u8;
+    let green = (255 * age / MAX_AGE) as u8;
+    let blue = 255;
+
+    rgb565(red, green, blue)
+}
+
+fn fill_rectangle_rgb565(
+    framebuffer: &mut [u8],
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    color: u16,
+) {
+    let screen_width = H_ACTIVE as usize;
+    let screen_height = V_ACTIVE as usize;
+
+    if x >= screen_width || y >= screen_height {
+        return;
+    }
+
+    let x_end = x.saturating_add(width).min(screen_width);
+    let y_end = y.saturating_add(height).min(screen_height);
+
+    let color_bytes = color.to_le_bytes();
+    let stride = screen_width * BYTES_PER_PIXEL;
+
+    for screen_y in y..y_end {
+        let start = screen_y * stride + x * BYTES_PER_PIXEL;
+        let end = screen_y * stride + x_end * BYTES_PER_PIXEL;
+
+        for pixel in framebuffer[start..end].chunks_exact_mut(2) {
+            pixel.copy_from_slice(&color_bytes);
+        }
     }
 }
 
-/// Draws the game grid using the cell age for color.
-fn draw_grid<D: DrawTarget<Color = Rgb565>>(
-    display: &mut D,
-    grid: &[[u8; GRID_WIDTH]; GRID_HEIGHT],
-) -> Result<(), D::Error> {
-    let border_color = Rgb565::new(230, 230, 230);
-    for (y, row) in grid.iter().enumerate() {
-        for (x, &age) in row.iter().enumerate() {
-            let point = Point::new(x as i32 * 7, y as i32 * 7);
-            if age > 0 {
-                // Draw a border then fill with color based on age.
-                Rectangle::new(point, Size::new(7, 7))
-                    .into_styled(PrimitiveStyle::with_fill(border_color))
-                    .draw(display)?;
-                // Draw an inner cell with color according to age.
-                Rectangle::new(point + Point::new(1, 1), Size::new(5, 5))
-                    .into_styled(PrimitiveStyle::with_fill(age_to_color(age)))
-                    .draw(display)?;
-            } else {
-                // Draw a dead cell as black.
-                Rectangle::new(point, Size::new(7, 7))
-                    .into_styled(PrimitiveStyle::with_fill(Rgb565::BLACK))
-                    .draw(display)?;
+fn draw_game(framebuffer: &mut [u8], grid: &GameGrid) {
+    const BORDER_COLOR: u16 = 0x7BEF; // Medium gray RGB565
+
+    let grid_pixel_width = GRID_WIDTH * CELL_SIZE;
+    let grid_pixel_height = GRID_HEIGHT * CELL_SIZE;
+
+    let offset_x = (H_ACTIVE as usize - grid_pixel_width) / 2;
+    let offset_y = (V_ACTIVE as usize - grid_pixel_height) / 2;
+
+    // Clear the entire screen to black.
+    framebuffer.fill(0);
+
+    for (grid_y, row) in grid.iter().enumerate() {
+        for (grid_x, &age) in row.iter().enumerate() {
+            if age == 0 {
+                continue;
             }
+
+            let x = offset_x + grid_x * CELL_SIZE;
+            let y = offset_y + grid_y * CELL_SIZE;
+
+            // Draw the cell's border.
+            fill_rectangle_rgb565(
+                framebuffer,
+                x,
+                y,
+                CELL_SIZE,
+                CELL_SIZE,
+                BORDER_COLOR,
+            );
+
+            // Draw the colored interior.
+            fill_rectangle_rgb565(
+                framebuffer,
+                x + CELL_INSET,
+                y + CELL_INSET,
+                CELL_SIZE - CELL_INSET * 2,
+                CELL_SIZE - CELL_INSET * 2,
+                age_to_color(age),
+            );
         }
-    }
-    Ok(())
-}
-
-fn write_generation<D: DrawTarget<Color = Rgb565>>(
-    display: &mut D,
-    generation: usize,
-) -> Result<(), D::Error> {
-    let mut num_str = heapless::String::<20>::new();
-    write!(num_str, "{generation}").unwrap();
-    Text::new(
-        num_str.as_str(),
-        Point::new(8, 13),
-        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-    )
-    .draw(display)?;
-    Ok(())
-}
-
-// --- ECS Resources and Systems ---
-
-#[derive(Resource)]
-struct GameOfLifeResource {
-    grid: [[u8; GRID_WIDTH]; GRID_HEIGHT],
-    generation: usize,
-}
-
-impl Default for GameOfLifeResource {
-    fn default() -> Self {
-        Self {
-            grid: [[0; GRID_WIDTH]; GRID_HEIGHT],
-            generation: 0,
-        }
-    }
-}
-
-#[derive(Resource)]
-struct RngResource(Rng);
-// Because our display type contains DMA descriptors and raw pointers, it isn’t Sync.
-// We wrap it as a NonSend resource so that Bevy doesn’t require Sync.
-
-struct DisplayResource {
-    display: MyDisplay,
-}
-
-
-fn update_game_of_life_system(
-    mut game: ResMut<GameOfLifeResource>,
-    mut rng_res: ResMut<RngResource>,
-) {
-    update_game_of_life(&mut game.grid);
-    game.generation += 1;
-    if game.generation >= RESET_AFTER_GENERATIONS {
-        randomize_grid(&mut rng_res.0, &mut game.grid);
-        game.generation = 0;
-    }
-}
-
-/// Render the game state by drawing into the offscreen framebuffer and then flushing
-/// it to the display via DMA. After drawing the game grid and generation number,
-/// we overlay centered text.
-/// 
-/// 
-
-
-fn render_system(
-    mut display_res:  <DisplayResource>,
-    game: Res<GameOfLifeResource>,
-    mut fb_res: ResMut<FrameBufferResource>,
-) {
-// Clear the framebuffer.
-fb_res.frame_buf.clear(Rgb565::BLACK).unwrap();
-    // Draw the game grid (using the age-based color) and generation number.
-    draw_grid(&mut fb_res.frame_buf, &game.grid).unwrap();
-    write_generation(&mut fb_res.frame_buf, game.generation).unwrap();
-
-    // --- Overlay centered text ---
-    let line1 = "Rust no_std ESP32-C6";
-    let line2 = "Bevy ECS 0.15 no_std";
-    // Estimate text width: assume ~8 pixels per character.
-    let line1_width = line1.len() as i32 * 8;
-    let line2_width = line2.len() as i32 * 8;
-    let x1 = (LCD_H_RES as i32 - line1_width) / 2 + 14;
-    let x2 = (LCD_H_RES as i32 - line2_width) / 2 + 14;
-    // For vertical centering, assume 26 pixels total text height.
-    let y = (LCD_V_RES as i32 - 26) / 2;
-    Text::new(
-        line1,
-        Point::new(x1, y),
-        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-    )
-    .draw(&mut fb_res.frame_buf)
-    .unwrap();
-    Text::new(
-        line2,
-        Point::new(x2, y + 14),
-        MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE),
-    )
-    .draw(&mut fb_res.frame_buf)
-    .unwrap();
-
-    // Define the area covering the entire framebuffer.
-    let area = Rectangle::new(Point::zero(), fb_res.frame_buf.size());
-    // Flush the framebuffer to the physical display.
-    display_res
-        .display
-        .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
-        .unwrap();
-}
-
-
-#[main]
-fn main() -> ! {
-    let peripherals = esp_hal::init(esp_hal::Config::default());
-    // Increase heap size as needed.
-    esp_alloc::heap_allocator!(size: 150 * 1024);
-    init_logger_from_env();
-
-    // --- DMA Buffers for SPI ---
-
-    #[allow(clippy::manual_div_ceil)]
-    let (rx_buffer, rx_descriptors, tx_buffer, tx_descriptors) = dma_buffers!(8912);
-    let dma_rx_buf = DmaRxBuf::new(rx_descriptors, rx_buffer).unwrap();
-    let dma_tx_buf = DmaTxBuf::new(tx_descriptors, tx_buffer).unwrap();
-// --- Display Setup using BSP values ---
-// SPI: SCK = GPIO7, MOSI = GPIO6, CS = GPIO14.
-let spi = Spi::<Blocking>::new(
-    peripherals.SPI2,
-    esp_hal::spi::master::Config::default()
-    .with_frequency(Rate::from_mhz(40))
-    .with_mode(esp_hal::spi::Mode::_0),
-    )
-    .unwrap()
-    .with_sck(peripherals.GPIO7)
-    .with_mosi(peripherals.GPIO6)
-    .with_dma(peripherals.DMA_CH0)
-    .with_buffers(dma_rx_buf, dma_tx_buf);
-    let cs_output = Output::new(peripherals.GPIO14, Level::High, OutputConfig::default());
-    let spi_delay = Delay::new();
-    let spi_device = ExclusiveDevice::new(spi, cs_output, spi_delay).unwrap();
-
-    // LCD interface: DC = GPIO15.
-    let lcd_dc = Output::new(peripherals.GPIO15, Level::Low, OutputConfig::default());
-    // Leak a Box to obtain a 'static mutable buffer.
-    let buffer: &'static mut [u8; 512] = Box::leak(Box::new([0_u8; 512]));
-    let di = SpiInterface::new(spi_device, lcd_dc, buffer);
-
-    let mut display_delay = Delay::new();
-    display_delay.delay_ns(500_000u32);
-
-    // Reset pin: GPIO21 (active low per BSP).
-    let reset = Output::new(peripherals.GPIO21, Level::Low, OutputConfig::default());
-    // Initialize the display using mipidsi's builder.
-    let mut display: MyDisplay = Builder::new(ST7789, di)
-        .reset_pin(reset)
-        .display_size(206, 320)
-        .invert_colors(ColorInversion::Inverted)
-        .init(&mut display_delay)
-        .unwrap();
-
-    display.clear(Rgb565::BLUE).unwrap();
-
-    // Backlight on GPIO22.
-    let mut backlight = Output::new(peripherals.GPIO22, Level::Low, OutputConfig::default());
-    backlight.set_high();
-
-    info!("Display initialized");
-
-    // --- Initialize Game Resources ---
-    let mut game = GameOfLifeResource::default();
-    let mut rng_instance = Rng::new();
-    randomize_grid(&mut rng_instance, &mut game.grid);
-    let glider = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)];
-    for (x, y) in glider.iter() {
-        game.grid[*y][*x] = 1; // alive with age 1
-    }
-
-    // Create the framebuffer resource.
-    let fb_res = FrameBufferResource::new();
-    
-    let mut world = World::default();
-    world.insert_resource(game);
-    world.insert_resource(RngResource(rng_instance));
-    // Insert the display as a non-send resource because its DMA pointers are not Sync.
-    world.insert_non_send_resource(DisplayResource { display });
-    // Insert the framebuffer resource as a normal resource.
-    world.insert_resource(fb_res);
-
-    let mut schedule = Schedule::default();
-    schedule.add_systems(update_game_of_life_system);
-    schedule.add_systems(render_system);
-
-    let mut loop_delay = Delay::new();
-    
-
-    loop {
-       
-       schedule.run(&mut world);
-       loop_delay.delay_ms(50u32);
-       
     }
 }
