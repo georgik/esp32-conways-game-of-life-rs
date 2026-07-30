@@ -10,9 +10,9 @@
 
 #![no_std]
 #![no_main]
-
-const H_ACTIVE: u32 = 1024;
-const V_ACTIVE: u32 = 600;
+ 
+const H_ACTIVE: u32 = 1024; //height of the screen
+const V_ACTIVE: u32 = 600;  //width of the screen
 
 const BYTES_PER_PIXEL: usize = 2;
 const FB_SIZE: usize = H_ACTIVE as usize * V_ACTIVE as usize * BYTES_PER_PIXEL;
@@ -24,7 +24,7 @@ const GRID_HEIGHT: usize = 50;
 const CELL_SIZE: usize = 12;
 const CELL_INSET: usize = 1;
 
-const RESET_AFTER_GENERATIONS: usize = 300;
+const RESET_AFTER_GENERATIONS: usize = 400;
 const FRAME_DELAY_MS: u32 = 80;
 
 type GameGrid = [[u8; GRID_WIDTH]; GRID_HEIGHT];
@@ -59,7 +59,7 @@ use core::{convert::Infallible, fmt::Write};
 use embedded_graphics::{
     Drawable,
     geometry::{OriginDimensions, Size},
-    mono_font::{MonoTextStyle, ascii::FONT_8X13},
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::{Rgb565, RgbColor},
     prelude::{DrawTarget, IntoStorage, Pixel, Point},
     text::{Baseline, Text},
@@ -157,7 +157,7 @@ fn main() -> ! {
 
     let mut dpi = bus.dpi(dpi_cfg, &fbs).expect("DPI init failed");
 
-    println!("Streaming");
+    println!("Screen Initializes succesfully");
 
     // ── MAIN GAME LOOP ───────────────────────────────────────────────────
 
@@ -189,11 +189,8 @@ fn main() -> ! {
         // Draw into the currently unused framebuffer.
         let back = dpi.framebuffer_mut();
 
-        // draw_game() clears and redraws the whole framebuffer.
-        draw_game(back, &grid);
-
-        // Draw the text afterward so it appears above the game.
-        draw_generation_text(back, generation);
+        draw_game(back, &grid); // draw_game() clears and redraws the whole framebuffer.
+        draw_generation_text(back, generation); // adds text
 
         // Flush the PSRAM cache and switch the DMA to this framebuffer.
         dpi.commit();
@@ -461,37 +458,51 @@ impl DrawTarget for MipiFrameBuffer<'_> {
 fn draw_generation_text(framebuffer: &mut [u8], generation: usize) {
     const RIGHT_MARGIN: usize = 8;
     const TOP_MARGIN: usize = 4;
-    const FONT_WIDTH: usize = 8;
-    const STATUS_HEIGHT: usize = 21;
 
-    // Form4t without using the heap.
+    // FONT_10X20 uses 10×20 pixel characters.
+    const FONT_WIDTH: usize = 10;
+    const FONT_HEIGHT: usize = 20;
+
+    const HORIZONTAL_PADDING: usize = 6;
+    const VERTICAL_PADDING: usize = 4;
+
+    // Format without heap allocation.
     let mut text = heapless::String::<32>::new();
     write!(&mut text, "Generation: {generation}").unwrap();
 
     let text_width = text.len() * FONT_WIDTH;
 
-    // Right-align the text.
+    // Right-align text against the display's right edge.
     let text_x = (H_ACTIVE as usize)
         .saturating_sub(RIGHT_MARGIN)
         .saturating_sub(text_width);
 
-    // Draw a small black rectangle behind the text so cells don't make it
-    // difficult to read.
-    let background_x = text_x.saturating_sub(4);
-    let background_width = text_width + 8;
+    let background_x = text_x.saturating_sub(HORIZONTAL_PADDING);
+    let background_y = TOP_MARGIN.saturating_sub(VERTICAL_PADDING);
 
+    let background_width = text_width + HORIZONTAL_PADDING * 2;
+    let background_height = FONT_HEIGHT + VERTICAL_PADDING * 2;
+
+    // Black background behind the text.
     fill_rectangle_rgb565(
         framebuffer,
         background_x,
-        0,
+        background_y,
         background_width,
-        STATUS_HEIGHT,
-        0x0000, // RGB565 black
+        background_height,
+        0x0000,
     );
 
-    let mut target = MipiFrameBuffer::new(framebuffer, H_ACTIVE as usize, V_ACTIVE as usize);
+    let mut target = MipiFrameBuffer::new(
+        framebuffer,
+        H_ACTIVE as usize,
+        V_ACTIVE as usize,
+    );
 
-    let style = MonoTextStyle::new(&FONT_8X13, Rgb565::WHITE);
+    let style = MonoTextStyle::new(
+        &FONT_10X20,
+        Rgb565::WHITE,
+    );
 
     Text::with_baseline(
         text.as_str(),

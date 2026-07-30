@@ -33,7 +33,7 @@ source ~/export-esp.sh
 - **Bevy ECS**: 0.18.1 (official release, used across all projects)
 - **esp-hal**: 1.1.0
 - **Rust Edition**: 2024
-- **Targets**: xtensa-esp32s3-none-elf, xtensa-esp32-none-elf, riscv32imc-unknown-none-elf, riscv32imac-unknown-none-elf, wasm32-wasi
+- **Targets**: xtensa-esp32s3-none-elf, xtensa-esp32-none-elf, riscv32imafc-unknown-none-elf ,riscv32imc-unknown-none-elf, riscv32imac-unknown-none-elf, wasm32-wasi
 
 ## Supported boards
 
@@ -47,6 +47,26 @@ The implementation is based on Rust no_std, using mipidsi crate.
 cd esp32-s3-box-3-minimal
 cargo run --release
 ```
+
+
+
+### ESP32-P4-Function-EV-Board
+
+![ESP32-P4 Function EV Board running Conway's Game of Life](docs/esp32-p4-function-ev-board.jpg)
+
+Bare-metal Rust `no_std` implementation for the
+ESP32-P4-Function-EV-Board v1.5 with the 1024 × 600 EK79007 MIPI-DSI
+display.
+
+This version uses direct game logic without Bevy ECS or Embassy.
+
+Build and flash:
+
+```bash
+cd esp32-p4-function-ev-board
+cargo run --release
+```
+
 
 ### Waveshare ESP32-C6-LCD 1.47
 
