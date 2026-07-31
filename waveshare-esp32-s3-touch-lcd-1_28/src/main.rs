@@ -224,7 +224,7 @@ fn write_generation<D: DrawTarget<Color = Rgb565>>(
     let y = 140;
 
     let mut num_str = heapless::String::<20>::new();
-    write!(num_str, "Generation: {generation}").unwrap();
+    write!(num_str, "Generace: {generation}").unwrap();
     Text::new(
         num_str.as_str(),
         Point::new(x, y),

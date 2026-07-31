@@ -1,0 +1,18 @@
+{
+    "version": 1,
+    "author": "Uri Shaked",
+    "editor": "wokwi",
+    "parts": [
+      { "type": "board-esp32-p4-function-ev", "id": "esp", "top": 0, "left": 0,
+            "attrs": {
+            "flashSize": "16",
+            "psramSize": "32",
+            "chipRevision": "3.1"
+            }
+        }
+    ],
+    "connections": [
+      ["esp:37", "$serialMonitor:RX", "", []],
+      ["esp:38", "$serialMonitor:TX", "", []]
+    ]
+}

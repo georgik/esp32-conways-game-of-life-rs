@@ -1,0 +1,65 @@
+[package]
+name = "esp32-p4-function-ev-board-conways-game-of-life"
+version = "0.7.0"
+authors = ["Juraj Michálek <juraj.michalek@espressif.com>", "Matěj David Ondráček <mathejdo@seznam.cz>"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+# Empty workspace to avoid being part of parent workspace
+[workspace]
+
+[dependencies]
+
+esp-hal = {
+    git = "https://github.com/esp-rs/esp-hal.git",
+    rev = "4533e78e0b522ae425addae4f8d44d014309a54c",
+    features = ["esp32p4", "unstable"]
+}
+
+esp-backtrace = {
+    git = "https://github.com/esp-rs/esp-hal.git",
+    rev = "4533e78e0b522ae425addae4f8d44d014309a54c",
+    features = ["panic-handler", "println", "esp32p4"]
+}
+
+esp-println = {
+    git = "https://github.com/esp-rs/esp-hal.git",
+    rev = "4533e78e0b522ae425addae4f8d44d014309a54c",
+    #default-features = false,
+    features = ["esp32p4", "log-04"]
+}
+
+
+esp-bootloader-esp-idf = {
+    git = "https://github.com/esp-rs/esp-hal.git",
+    rev = "4533e78e0b522ae425addae4f8d44d014309a54c",
+    features = ["esp32p4"]
+}
+
+#log = { version = "0.4.29" }
+
+embedded-graphics = "0.8.2"
+heapless = "0.9.2"
+
+esp-alloc = { 
+    git = "https://github.com/esp-rs/esp-hal.git",
+    rev = "4533e78e0b522ae425addae4f8d44d014309a54c",
+    default-features = false,
+    features = ["esp32p4","global-allocator"]}
+
+
+# For fine tuning these settings, please refer to https://doc.rust-lang.org/cargo/reference/profiles.html
+[profile.dev]
+# The default debug profile is too slow and too big for resource-constrained devices.
+# Always build with some optimizations enabled.
+opt-level = "s"
+
+[profile.release]
+codegen-units = 1     # LLVM can perform better optimizations using a single thread
+debug         = 2     # prefer slower builds but better debugging experience
+lto           = 'fat'
+opt-level     = 's'
+
+
+[features]
+default = [ "esp-hal/esp32p4" ]

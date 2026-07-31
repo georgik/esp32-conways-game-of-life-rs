@@ -1,10 +1,9 @@
 [package]
-name = "waveshare-esp32-s3-touch-lcd-1_28-conways-game-of-life-rs"
+name = "waveshare-esp32-p4-touch-lcd-1_28-conways-game-of-life-rs"
 version = "0.7.0"
 authors = ["Juraj Michálek <juraj.michalek@espressif.com>"]
 edition = "2024"
 license = "MIT OR Apache-2.0"
-
 
 
 # Empty workspace to avoid being part of parent workspace

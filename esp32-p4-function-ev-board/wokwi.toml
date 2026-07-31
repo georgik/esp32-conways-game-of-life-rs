@@ -1,0 +1,9 @@
+[wokwi]
+version = 1
+
+elf =       "target/riscv32imafc-unknown-none-elf/release/esp32-p4-function-ev-board-conways-game-of-life"
+firmware =  "target/riscv32imafc-unknown-none-elf/release/esp32-p4-function-ev-board-conways-game-of-life"
+
+gdbServerPort = 3333
+#elf =      "target/riscv32imafc-unknown-none-elf/release/esp32-p4-function-ev-board-conways-game-of-life"
+#firmware = "target/riscv32imafc-unknown-none-elf/release/esp32-p4-function-ev-board-conways-game-of-life"
