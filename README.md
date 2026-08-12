@@ -2,7 +2,7 @@
 
 Implementation of Conway's Game of Life Rust Bare Metal.
 
-[![Wokwi](https://img.shields.io/endpoint?url=https%3A%2F%2Fwokwi.com%2Fbadge%2Fclick-to-simulate.json)](https://wokwi.com/projects/380370193649185793)
+[![Wokwi](https://img.shields.io/endpoint?url=https%3A%2F%2Fwokwi.com%2Fbadge%2Fclick-to-simulate.json)](https://wokwi.com/experimental/viewer?diagram=https%3A%2F%2Fraw.githubusercontent.com%2Fgeorgik%2esp32-conways-game-of-life-rs%2Fmain%2Fesp32-wrover-kit%2Fdiagram.json&firmware=https://github.com/georgik/esp32-conways-game-of-life-rs/releases/download/v0.5.0/esp32-conways-game-of-life-rs)
 
 ![ESP32 Conways Game of Life in Rust](docs/esp32-conways-game-of-life-rs.png)
 
