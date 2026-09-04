@@ -12,6 +12,7 @@ use modules::{
     psram_feature::remove_psram_feature,
     fix_cargo::{fix_corrupted_cargo_toml, scan_corrupted_files, scan_and_fix_corrupted_files},
     embassy::migrate_embassy_api,
+    esphal::{pin_incompatible_esp_hal},
     toml_fix::fix_cargo_toml_quotes,
     wasm::{build_wasm, serve_wasm},
 };
@@ -118,6 +119,13 @@ enum Commands {
         #[arg(long, short)]
         verbose: bool,
     },
+    /// Pin esp-hal to the last compatible 1.1.x line for boards still using the legacy DMA API
+    PinEspHal {
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, short)]
+        verbose: bool,
+    },
     /// Build WASM version for web browser
     BuildWasm {
         #[arg(long, short)]
@@ -211,6 +219,7 @@ async fn run_commands(
             fix_cargo_toml_quotes(&projects, dry_run, verbose).await
         }
         Commands::Clippy { verbose } => clippy_all_projects(&projects, verbose).await,
+        Commands::PinEspHal { dry_run, verbose } => pin_incompatible_esp_hal(&projects, dry_run, verbose).await,
         Commands::BuildWasm { .. } | Commands::ServeWasm { .. } => {
             // These should never reach here as they're handled before project discovery
             anyhow::bail!("WASM commands should be handled before project discovery")

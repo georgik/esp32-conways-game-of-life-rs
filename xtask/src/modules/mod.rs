@@ -8,3 +8,4 @@ pub mod fix_cargo;
 pub mod embassy;
 pub mod toml_fix;
 pub mod wasm;
+pub mod esphal;
