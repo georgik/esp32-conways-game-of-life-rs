@@ -46,6 +46,11 @@ on:
         required: false
         default: 'true'
         type: boolean
+      reuse_run_id:
+        description: 'Reuse flash-files artifacts from a previous run (enter a run-id to skip the build and recycle artifacts)'
+        required: false
+        default: ''
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
@@ -67,6 +72,9 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: Build + package
+    # Skip the whole build (and its artifacts) when reusing a previous run's
+    # artifacts via the reuse_run_id input — that path only needs the flash job.
+    if: ${{ github.event.inputs.reuse_run_id == '' }}
     # Pinned to ubuntu-24.04 so the run does not silently migrate to Ubuntu 26
     # and so GitHub-hosted actions keep running on their bundled Node (no
     # "Node.js 20 is being forced to run on Node.js 24" deprecation noise).
@@ -197,13 +205,29 @@ jobs:
           chmod +x ./espbrew
           ./espbrew --version
 
-      - name: Download build artifacts
+      - name: Download current build artifacts
+        # Only when NOT reusing: pull the artifacts this run's build job uploaded.
+        if: ${{ github.event.inputs.reuse_run_id == '' }}
         # continue-on-error: the flash job runs even when the build job was
         # cancelled, in which case there is nothing to download.
         uses: actions/download-artifact@v5
         with:
           name: flash-files
           path: flash-files
+        continue-on-error: true
+
+      - name: Download reused artifacts from previous run
+        # Reuse mode: recycle artifacts from an earlier run by run-id, skipping
+        # the expensive rebuild. repository/run-id target that specific run.
+        if: ${{ github.event.inputs.reuse_run_id != '' }}
+        # continue-on-error: if the run-id is stale/expired the download fails
+        # but we do not want to abort the whole flash job because of it.
+        uses: actions/download-artifact@v5
+        with:
+          name: flash-files
+          path: flash-files
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.inputs.reuse_run_id }}
         continue-on-error: true
 
       - name: Extract flash artifacts
@@ -220,14 +244,26 @@ jobs:
           unzip -o flash-files.zip
 
       - name: Flash each board
+        # DEBUG ONLY: `set -x` prints every command with args expanded so we can
+        # pinpoint the exact espbrew failure. ESPBREW_CLUSTER is a masked secret,
+        # so the printed --cluster value shows as *** — no leak. Remove once the
+        # real error is captured.
         run: |
           set -euo pipefail
+          set -x
 
           ESPBREW="$GITHUB_WORKSPACE/espbrew"
           if [ ! -x "$ESPBREW" ]; then
             echo "ERROR: espbrew binary missing at $ESPBREW (download step failed?)"
             exit 1
           fi
+
+          # Track results so we can print a pass/fail report at the end. A single
+          # board failing (e.g. a flaky cluster connection) must NOT stop the
+          # others from flashing — this is how the esp-idf-component-raylib
+          # examples run CI: attempt every board, then report which passed.
+          passed=()
+          failed=()
 
           # Read the board manifest: one "alias<TAB>project" line per board.
           # project defaults to alias when the two are identical.
@@ -238,6 +274,7 @@ jobs:
 
             if [ ! -d "$artifact_dir" ]; then
               echo "SKIP  ${alias}: no artifact for project '${project}' (build skipped)"
+              failed+=("$alias")
               continue
             fi
 
@@ -249,14 +286,16 @@ jobs:
             if [ ! -f "$artifact_dir/Cargo.toml" ] \
                || [ ! -f "$artifact_dir/.cargo/config.toml" ]; then
               echo "FAILED ${alias}: artifact missing Cargo.toml/.cargo/config.toml (pack step incomplete)"
-              exit 1
+              failed+=("$alias")
+              continue
             fi
             elf=$(find "$artifact_dir/target" -type f \
                     ! -name '*.d' ! -name '*.o' ! -name '*.rlib' \
                     ! -name '*.rmeta' ! -name '*.a' 2>/dev/null | head -1)
             if [ -z "$elf" ]; then
               echo "FAILED ${alias}: artifact has no ELF under target/<triple>/release (build/pack incomplete)"
-              exit 1
+              failed+=("$alias")
+              continue
             fi
 
             echo ">>> Flashing ${alias} (project: ${project})"
@@ -267,6 +306,13 @@ jobs:
             #    bootloader/partitions/app. The single `flash` command has no
             #    --exit-on-error (that is a flash-batch flag), so we fail on the
             #    command's own exit code.
+            #
+            # Wrap in `set +e`/`set -e` on purpose: a non-zero espbrew return
+            # must land in $flash_rc, not trip `set -e` on the assignment and
+            # exit silently — which previously hid the real espbrew error behind
+            # "Process completed with exit code 1" with no output.
+            echo ">>> [1/2] espbrew flash -> ${alias}"
+            set +e
             flash_output=$(
               cd "$artifact_dir"
               "$ESPBREW" --cluster "$ESPBREW_CLUSTER" \
@@ -274,10 +320,12 @@ jobs:
                 flash 2>&1
             )
             flash_rc=$?
+            set -e
             echo "$flash_output"
             if [ "$flash_rc" -ne 0 ]; then
               echo "FAILED ${alias}: espbrew flash exited with code ${flash_rc}"
-              exit 1
+              failed+=("$alias")
+              continue
             fi
 
             # 2) Boot verification. Stream the serial console via the cluster
@@ -285,6 +333,8 @@ jobs:
             #    "abort() was called". `--exit-on-error` makes the monitor
             #    command return non-zero when that pattern appears, and
             #    --no-raw keeps it non-interactive under CI.
+            echo ">>> [2/2] espbrew monitor -> ${alias}"
+            set +e
             boot_output=$(
               cd "$artifact_dir"
               "$ESPBREW" --cluster "$ESPBREW_CLUSTER" \
@@ -294,13 +344,32 @@ jobs:
                 --no-raw 2>&1
             )
             boot_rc=$?
+            set -e
             echo "$boot_output"
             if [ "$boot_rc" -ne 0 ]; then
               echo "FAILED ${alias}: firmware crashed on boot (abort() was called)"
-              exit 1
+              failed+=("$alias")
+              continue
             fi
 
             echo "OK      ${alias}"
+            passed+=("$alias")
           done < <(awk '/^  - alias:/ {a=$3} /^    project:/ {print a "\t" $2}' boards.yaml)
 
-          echo "All flashable boards done."
+          # ---- Report: which boards passed / failed ---------------------------
+          # The job still fails (exit 1) if any board failed, but every board has
+          # been attempted and the report shows exactly which passed and which
+          # failed.
+          echo "==================== FLASH REPORT ===================="
+          if [ "${#passed[@]}" -gt 0 ]; then
+            echo "PASSED (${#passed[@]}): ${passed[*]}"
+          else
+            echo "PASSED: none"
+          fi
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "FAILED (${#failed[@]}): ${failed[*]}"
+            echo "===================================================="
+            exit 1
+          fi
+          echo "All flashable boards passed."
+          echo "===================================================="
