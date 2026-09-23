@@ -4,16 +4,17 @@ use clap::{Parser, Subcommand};
 mod modules;
 
 use modules::{
-    project::discover_projects,
-    build::{build_all_projects, format_all_projects, clippy_all_projects},
-    update::update_dependencies,
-    migrate::{search_pattern, migrate_psram_init},
+    build::{build_all_projects, clippy_all_projects, format_all_projects},
     config::{clean_deprecated_config, fix_workspace_issues},
-    psram_feature::remove_psram_feature,
-    fix_cargo::{fix_corrupted_cargo_toml, scan_corrupted_files, scan_and_fix_corrupted_files},
     embassy::migrate_embassy_api,
-    esphal::{pin_incompatible_esp_hal},
+    esphal::pin_incompatible_esp_hal,
+    fix_cargo::{fix_corrupted_cargo_toml, scan_and_fix_corrupted_files, scan_corrupted_files},
+    migrate::{migrate_psram_init, search_pattern},
+    pack::pack_all_projects,
+    project::discover_projects,
+    psram_feature::remove_psram_feature,
     toml_fix::fix_cargo_toml_quotes,
+    update::update_dependencies,
     wasm::{build_wasm, serve_wasm},
 };
 
@@ -131,6 +132,12 @@ enum Commands {
         #[arg(long, short)]
         verbose: bool,
     },
+    /// Package the minimal espbrew flash artifact per project
+    /// (Cargo.toml + .cargo/config.toml + target/<triple>/release/<elf>)
+    Pack {
+        #[arg(long, short)]
+        verbose: bool,
+    },
     /// Build and serve WASM version
     ServeWasm {
         #[arg(long, short)]
@@ -219,7 +226,10 @@ async fn run_commands(
             fix_cargo_toml_quotes(&projects, dry_run, verbose).await
         }
         Commands::Clippy { verbose } => clippy_all_projects(&projects, verbose).await,
-        Commands::PinEspHal { dry_run, verbose } => pin_incompatible_esp_hal(&projects, dry_run, verbose).await,
+        Commands::Pack { verbose } => pack_all_projects(&projects, verbose),
+        Commands::PinEspHal { dry_run, verbose } => {
+            pin_incompatible_esp_hal(&projects, dry_run, verbose).await
+        }
         Commands::BuildWasm { .. } | Commands::ServeWasm { .. } => {
             // These should never reach here as they're handled before project discovery
             anyhow::bail!("WASM commands should be handled before project discovery")
@@ -228,7 +238,10 @@ async fn run_commands(
 }
 
 async fn list_projects(projects: &[crate::modules::project::ProjectInfo]) -> Result<()> {
-    println!("\n[LIST] Discovered ESP32 Projects ({} total):", projects.len());
+    println!(
+        "\n[LIST] Discovered ESP32 Projects ({} total):",
+        projects.len()
+    );
     println!("┌─────┬──────────────────────────────────────┬────────────┐");
     println!("│ #   │ Project Name                         │ Status     │");
     println!("├─────┼──────────────────────────────────────┼────────────┤");

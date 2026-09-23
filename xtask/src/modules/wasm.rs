@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use std::process::Command;
 use std::path::PathBuf;
+use std::process::Command;
 
 pub async fn build_wasm(_verbose: bool) -> Result<()> {
     println!("Building Conway's Game of Life WASM...");

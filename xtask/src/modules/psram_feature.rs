@@ -50,10 +50,16 @@ pub async fn remove_psram_feature(
         println!("Failed: {} projects", summary.failed);
     }
 
-    let migrated_count = results.iter().filter(|r| r.success && !r.message.is_empty()).count();
+    let migrated_count = results
+        .iter()
+        .filter(|r| r.success && !r.message.is_empty())
+        .count();
     if migrated_count > 0 {
         println!("\nProjects updated: {}", migrated_count);
-        for result in results.iter().filter(|r| r.success && !r.message.is_empty()) {
+        for result in results
+            .iter()
+            .filter(|r| r.success && !r.message.is_empty())
+        {
             println!("  * {}", result.project);
         }
     }
@@ -107,9 +113,18 @@ async fn remove_project_psram_feature(
     if new_content.contains("esp-hal") && new_content.contains("psram") {
         // Remove "psram" from features arrays
         new_content = new_content
-            .replace("features = [\"esp32s3\", \"unstable\", \"psram\"]", "features = [\"esp32s3\", \"unstable\"]")
-            .replace("features = [\"esp32\", \"unstable\", \"psram\"]", "features = [\"esp32\", \"unstable\"]")
-            .replace("features = [\"esp32s3\", \"psram\"]", "features = [\"esp32s3\"]")
+            .replace(
+                "features = [\"esp32s3\", \"unstable\", \"psram\"]",
+                "features = [\"esp32s3\", \"unstable\"]",
+            )
+            .replace(
+                "features = [\"esp32\", \"unstable\", \"psram\"]",
+                "features = [\"esp32\", \"unstable\"]",
+            )
+            .replace(
+                "features = [\"esp32s3\", \"psram\"]",
+                "features = [\"esp32s3\"]",
+            )
             .replace("esp-hal/psram", "")
             .replace("psram", "");
 

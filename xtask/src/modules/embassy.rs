@@ -50,10 +50,16 @@ pub async fn migrate_embassy_api(
         println!("Failed: {} projects", summary.failed);
     }
 
-    let migrated_count = results.iter().filter(|r| r.success && !r.message.is_empty()).count();
+    let migrated_count = results
+        .iter()
+        .filter(|r| r.success && !r.message.is_empty())
+        .count();
     if migrated_count > 0 {
         println!("\nProjects migrated: {}", migrated_count);
-        for result in results.iter().filter(|r| r.success && !r.message.is_empty()) {
+        for result in results
+            .iter()
+            .filter(|r| r.success && !r.message.is_empty())
+        {
             println!("  * {}", result.project);
         }
     }
@@ -104,11 +110,12 @@ async fn migrate_project_embassy(
     let mut new_content = content.clone();
 
     // Fix 1: esp_rtos::start() now requires SoftwareInterrupt parameter
-    if new_content.contains("esp_rtos::start(") &&
-       !new_content.contains("esp_rtos::start(timer0, sw_ints.software_interrupt0)") {
+    if new_content.contains("esp_rtos::start(")
+        && !new_content.contains("esp_rtos::start(timer0, sw_ints.software_interrupt0)")
+    {
         new_content = new_content.replace(
             "esp_rtos::start(timer0);",
-            "esp_rtos::start(timer0, sw_ints.software_interrupt0);"
+            "esp_rtos::start(timer0, sw_ints.software_interrupt0);",
         );
         changes.push("Added SoftwareInterrupt parameter to esp_rtos::start".to_string());
     }
@@ -124,23 +131,23 @@ async fn migrate_project_embassy(
                 "esp_rtos::start_second_core(\n        peripherals.CPU_CTRL,\n        sw_ints.software_interrupt0,"
             );
             // Add closure wrapper for the task
-            new_content = new_content.replace(
-                "|| { app_core_task() }",
-                "{ || { app_core_task() } }"
-            );
+            new_content =
+                new_content.replace("|| { app_core_task() }", "{ || { app_core_task() } }");
             changes.push("Updated esp_rtos::start_second_core() API".to_string());
         }
     }
 
     // Fix 3: Remove .ok() and .unwrap() from spawn calls
     if new_content.contains(".spawn(") && new_content.contains(".ok()") {
-        new_content = new_content.replace(".spawn(", ".spawn_")
+        new_content = new_content
+            .replace(".spawn(", ".spawn_")
             .replace(".ok();", ";");
         changes.push("Removed .ok() from spawn calls".to_string());
     }
 
     if new_content.contains(".spawn(") && new_content.contains(".unwrap()") {
-        new_content = new_content.replace(".spawn(", ".spawn_")
+        new_content = new_content
+            .replace(".spawn(", ".spawn_")
             .replace(".unwrap();", ";");
         changes.push("Removed .unwrap() from spawn calls".to_string());
     }

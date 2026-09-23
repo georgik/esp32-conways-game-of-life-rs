@@ -44,7 +44,8 @@ pub async fn pin_incompatible_esp_hal(
     let already_ok = results
         .iter()
         .filter(|r| {
-            r.message.contains("already compatible") || r.message.contains("already pinned (no change)")
+            r.message.contains("already compatible")
+                || r.message.contains("already pinned (no change)")
         })
         .count();
     let no_legacy_api = results
@@ -112,7 +113,10 @@ async fn pin_project_esp_hal(
         return Ok(TaskResult {
             project: project.name.clone(),
             success: true,
-            message: format!("already pinned (no change) - resolved esp-hal {}", resolved_str),
+            message: format!(
+                "already pinned (no change) - resolved esp-hal {}",
+                resolved_str
+            ),
             warnings: Vec::new(),
         });
     }
@@ -121,7 +125,10 @@ async fn pin_project_esp_hal(
         return Ok(TaskResult {
             project: project.name.clone(),
             success: true,
-            message: format!("would pin esp-hal -> {} (resolved from {})", COMPATIBLE_ESP_HAL, resolved_str),
+            message: format!(
+                "would pin esp-hal -> {} (resolved from {})",
+                COMPATIBLE_ESP_HAL, resolved_str
+            ),
             warnings: Vec::new(),
         });
     }
@@ -132,7 +139,10 @@ async fn pin_project_esp_hal(
     Ok(TaskResult {
         project: project.name.clone(),
         success: true,
-        message: format!("pinned esp-hal -> {} (resolved from {})", COMPATIBLE_ESP_HAL, resolved_str),
+        message: format!(
+            "pinned esp-hal -> {} (resolved from {})",
+            COMPATIBLE_ESP_HAL, resolved_str
+        ),
         warnings: Vec::new(),
     })
 }

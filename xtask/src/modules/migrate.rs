@@ -2,7 +2,11 @@ use crate::modules::project::{ProjectInfo, TaskResult, TaskSummary};
 use anyhow::Result;
 use std::fs;
 
-pub async fn search_pattern(projects: &[ProjectInfo], pattern: &str, file_type: &str) -> Result<()> {
+pub async fn search_pattern(
+    projects: &[ProjectInfo],
+    pattern: &str,
+    file_type: &str,
+) -> Result<()> {
     println!("\n[SEARCH] Pattern: '{}' in {} files", pattern, file_type);
     println!("{}", "=".repeat(60));
 
@@ -50,7 +54,10 @@ pub async fn search_pattern(projects: &[ProjectInfo], pattern: &str, file_type: 
         println!("\n{}", "=".repeat(60));
         println!("Search Results:");
         println!("Found in {} projects", found_count);
-        println!("Total matches: {}", results.iter().map(|(_, m)| m.len()).sum::<usize>());
+        println!(
+            "Total matches: {}",
+            results.iter().map(|(_, m)| m.len()).sum::<usize>()
+        );
     }
 
     Ok(())
@@ -104,10 +111,16 @@ pub async fn migrate_psram_init(
         println!("Failed: {} projects", summary.failed);
     }
 
-    let migrated_count = results.iter().filter(|r| r.success && !r.message.is_empty()).count();
+    let migrated_count = results
+        .iter()
+        .filter(|r| r.success && !r.message.is_empty())
+        .count();
     if migrated_count > 0 {
         println!("\nProjects migrated: {}", migrated_count);
-        for result in results.iter().filter(|r| r.success && !r.message.is_empty()) {
+        for result in results
+            .iter()
+            .filter(|r| r.success && !r.message.is_empty())
+        {
             println!("  * {}", result.project);
         }
     }

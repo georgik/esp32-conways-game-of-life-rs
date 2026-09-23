@@ -1,0 +1,190 @@
+name: Flash ESP32 (espbrew)
+
+# Builds every ESP32 project, packages the minimal espbrew flash artifact for
+# each (via the existing `cargo xtask pack` step), then on the self-hosted
+# runner (which has espbrew + hardware) downloads those artifacts and flashes
+# every registered board.
+#
+# For a Rust no_std ESP release build we do NOT pre-assemble a single flash
+# image. We only transfer the project markers plus the built ELF:
+#
+#     pack-<board>/Cargo.toml
+#     pack-<board>/.cargo/config.toml
+#     pack-<board>/target/<triple>/release/<elf>
+#
+# On the runner, `espbrew flash` auto-detects the Rust project from those
+# markers, reads the target triple from .cargo/config.toml, locates the ELF, and
+# the cluster leader converts it into the bootloader / partitions / app images
+# on the server. flash-batch cannot be used for Rust projects (it only understands
+# ESP-IDF flash_args), so we invoke the single `flash` command per board.
+#
+# To add a board: add its espbrew alias to boards.yaml (and make sure the
+# project builds). Nothing else needs to change.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "esp32-**/**"
+      - "esope-**/**"
+      - "m5stack-**/**"
+      - "waveshare-**/**"
+      - "xtask/**"
+      - "boards.yaml"
+      - ".github/workflows/flash-esp32.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "esp32-**/**"
+      - "esope-**/**"
+      - "m5stack-**/**"
+      - "waveshare-**/**"
+      - "xtask/**"
+      - "boards.yaml"
+      - ".github/workflows/flash-esp32.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  ESPBREW_VERSION: v0.8.1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build + package (GitHub-hosted runner).
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build + package
+    # Pinned to ubuntu-24.04 so the run does not silently migrate to Ubuntu 26.
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install ESP toolchain
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf \
+            https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall -y espflash espup
+          espup install --toolchain-version 1.90.0.0
+          source ~/export-esp.sh
+
+      - name: Setup Rust stable toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+          targets: |
+            riscv32imac-unknown-none-elf
+            riscv32imc-unknown-none-elf
+
+      - name: Setup ESP Xtensa toolchain
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
+          version: "1.90.0"
+
+      - name: Build xtask maintenance tool
+        run: cargo build --manifest-path xtask/Cargo.toml
+
+      - name: Build all ESP32 projects
+        run: cargo xtask build --keep-going
+
+      - name: Package espbrew flash artifacts
+        run: cargo xtask pack
+
+      - name: Upload per-board artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flash-files
+          # One directory per built project: pack-<board>/{Cargo.toml,.cargo/config.toml,target/<triple>/release/<elf>}
+          path: pack-*/
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Flash (self-hosted hardware runner with espbrew).
+  # ---------------------------------------------------------------------------
+  flash:
+    name: Flash boards
+    runs-on: [ self-hosted ]
+    needs: build
+    # Run even if some builds failed so a single board's failed build does not
+    # block flashing the others. Boards whose artifact is missing are skipped.
+    if: always()
+    env:
+      ESPBREW_CLUSTER: ${{ secrets.ESPBREW_CLUSTER }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download espbrew
+        run: |
+          set -euo pipefail
+          # Download to the repo root ($GITHUB_WORKSPACE); espbrew is invoked by
+          # absolute path below so the cwd does not matter.
+          curl -fsSL \
+            "https://github.com/georgik/espbrew-go/releases/download/${ESPBREW_VERSION}/espbrew-linux-amd64" \
+            -o espbrew
+          chmod +x ./espbrew
+          ./espbrew --version
+
+      - name: Download build artifacts
+        # continue-on-error: the flash job runs even when the build job was
+        # cancelled, in which case there is nothing to download.
+        uses: actions/download-artifact@v4
+        with:
+          name: flash-files
+          path: flash-files
+        continue-on-error: true
+
+      - name: Flash each board
+        run: |
+          set -euo pipefail
+
+          ESPBREW="$GITHUB_WORKSPACE/espbrew"
+
+          # Read the board manifest: one "alias<TAB>project" line per board.
+          # project defaults to alias when the two are identical.
+          while IFS=$'\t' read -r alias project; do
+            [ -z "${alias:-}" ] && continue
+            project="${project:-$alias}"
+            artifact_dir="flash-files/pack-${project}"
+
+            if [ ! -d "$artifact_dir" ]; then
+              echo "SKIP  ${alias}: no artifact for project '${project}' (build skipped)"
+              continue
+            fi
+
+            echo ">>> Flashing ${alias} (project: ${project})"
+            # Run from inside the artifact dir so espbrew auto-detects the Rust
+            # project (Cargo.toml + .cargo/config.toml) and locates the ELF, then
+            # converts it to bootloader/partitions/app on the server.
+            # --filter-alias addresses the board by its espbrew cluster alias.
+            # --monitor-duration streams the serial console for boot verification.
+            # The single `flash` command has no --exit-on-error (that is a
+            # flash-batch flag), so we capture the output and fail on the panic
+            # marker "abort() was called" if the firmware crashes on boot.
+            output=$(
+              cd "$artifact_dir"
+              "$ESPBREW" --cluster "$ESPBREW_CLUSTER" \
+                --filter-alias "$alias" \
+                --monitor-duration 15 \
+                flash 2>&1
+            )
+            rc=$?
+            echo "$output"
+            if [ "$rc" -ne 0 ]; then
+              echo "FAILED ${alias}: espbrew exited with code ${rc}"
+              exit 1
+            fi
+            if printf '%s' "$output" | grep -q "abort() was called"; then
+              echo "FAILED ${alias}: firmware crashed on boot (abort() was called)"
+              exit 1
+            fi
+          done < <(awk '/^  - alias:/ {a=$3} /^    project:/ {print a "\t" $2}' boards.yaml)
+
+          echo "All flashable boards done."

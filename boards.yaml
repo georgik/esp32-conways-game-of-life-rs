@@ -1,0 +1,34 @@
+# Boards that can be flashed in CI.
+#
+# This is the single source of truth for the "flash" job. Each entry MUST use an
+# `alias` registered in the espbrew cluster (see wiki/espbrew.toml on the
+# self-hosted runner); aliases that are not registered have no hardware and are
+# skipped.
+#
+# `project` is the directory produced by `cargo xtask pack` (pack-<project>/),
+# which is normally identical to the alias. It is only overridden when the
+# project directory name differs from the espbrew alias (e.g. the waveshare
+# board uses a "." in its alias but "_" in its directory name).
+#
+# The "flash" job reads this file (alias + optional project per entry) so the
+# board list lives in exactly one place.
+#
+# NOTE: espbrew auto-detects the Rust project from .cargo/config.toml. Its
+# detector only recognises the target triples it knows about (xtensa-esp32*,
+# riscv32imac/riscv32imc-unknown-none-elf). `esp32-p4-function-ev-board` targets
+# `riscv32imafc-unknown-none-elf`, which espbrew v0.8.1 does not recognise, so
+# it cannot be auto-detected and is intentionally omitted here. Re-add it once
+# espbrew supports the riscv32imafc triple.
+boards:
+  - alias: esp32-s3-box-3
+    project: esp32-s3-box-3
+  - alias: esp32-s3-lcd-ev-board
+    project: esp32-s3-lcd-ev-board
+  - alias: m5stack-atom-s3
+    project: m5stack-atom-s3
+  - alias: m5stack-atom-s3r
+    project: m5stack-atom-s3r
+  - alias: m5stack-core2
+    project: m5stack-core2
+  - alias: waveshare-esp32-s3-touch-lcd-1.28
+    project: waveshare-esp32-s3-touch-lcd-1_28

@@ -50,10 +50,16 @@ pub async fn fix_corrupted_cargo_toml(
         println!("Failed: {} projects", summary.failed);
     }
 
-    let fixed_count = results.iter().filter(|r| r.success && !r.message.is_empty()).count();
+    let fixed_count = results
+        .iter()
+        .filter(|r| r.success && !r.message.is_empty())
+        .count();
     if fixed_count > 0 {
         println!("\nProjects fixed: {}", fixed_count);
-        for result in results.iter().filter(|r| r.success && !r.message.is_empty()) {
+        for result in results
+            .iter()
+            .filter(|r| r.success && !r.message.is_empty())
+        {
             println!("  * {}", result.project);
         }
     }
@@ -187,10 +193,7 @@ async fn fix_project_cargo_toml(
     })
 }
 
-pub async fn scan_and_fix_corrupted_files(
-    projects: &[ProjectInfo],
-    dry_run: bool,
-) -> Result<()> {
+pub async fn scan_and_fix_corrupted_files(projects: &[ProjectInfo], dry_run: bool) -> Result<()> {
     println!("\n[SCAN & FIX] Scanning and fixing corrupted Cargo.toml files");
     if dry_run {
         println!("DRY-RUN mode - no changes will be made");
@@ -266,20 +269,21 @@ pub async fn scan_and_fix_corrupted_files(
 }
 
 fn is_corrupted_cargo_toml(content: &str) -> bool {
-    content.contains("\"\"") ||
-    content.contains("[,") ||
-    content.contains(",]") ||
-    content.contains(", ,") ||
-    content.contains("authors = [") && !content.contains("authors = [\"")
+    content.contains("\"\"")
+        || content.contains("[,")
+        || content.contains(",]")
+        || content.contains(", ,")
+        || content.contains("authors = [") && !content.contains("authors = [\"")
 }
 
 fn fix_corrupted_content(content: &str) -> String {
     let mut new_content = content.to_string();
 
     // Fix corrupted authors field: [Name " <email>""]
-    new_content = new_content
-        .replace(r#"authors = [Juraj Michálek " <juraj.michalek@espressif.com>""]"#,
-                 r#"authors = ["Juraj Michálek <juraj.michalek@espressif.com>"]"#);
+    new_content = new_content.replace(
+        r#"authors = [Juraj Michálek " <juraj.michalek@espressif.com>""]"#,
+        r#"authors = ["Juraj Michálek <juraj.michalek@espressif.com>"]"#,
+    );
 
     // Fix authors field: missing quotes around array content
     if new_content.contains("authors = [") && !new_content.contains("authors = [\"") {

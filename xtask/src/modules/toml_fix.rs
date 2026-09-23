@@ -51,10 +51,16 @@ pub async fn fix_cargo_toml_quotes(
         println!("Failed: {} projects", summary.failed);
     }
 
-    let fixed_count = results.iter().filter(|r| r.success && !r.message.is_empty()).count();
+    let fixed_count = results
+        .iter()
+        .filter(|r| r.success && !r.message.is_empty())
+        .count();
     if fixed_count > 0 {
         println!("\nProjects fixed: {}", fixed_count);
-        for result in results.iter().filter(|r| r.success && !r.message.is_empty()) {
+        for result in results
+            .iter()
+            .filter(|r| r.success && !r.message.is_empty())
+        {
             println!("  * {}", result.project);
         }
     }
@@ -154,7 +160,9 @@ fn fix_feature_quotes(toml_value: &mut Value) -> bool {
                             for feature in feat_array.iter_mut() {
                                 if let Some(feat_str) = feature.as_str() {
                                     if !feat_str.starts_with('"') && !feat_str.contains("->") {
-                                        if let Some(new_str) = format!("\"{}\"", feat_str).parse::<Value>().ok() {
+                                        if let Some(new_str) =
+                                            format!("\"{}\"", feat_str).parse::<Value>().ok()
+                                        {
                                             *feature = new_str;
                                             modified = true;
                                         }
@@ -177,7 +185,11 @@ fn fix_feature_quotes(toml_value: &mut Value) -> bool {
                         if let Some(feat_str) = feature.as_str() {
                             // Fix esp-hal/esp32 style references
                             if feat_str.contains("esp-hal/") && !feat_str.contains("\"esp-hal/") {
-                                if let Some(new_str) = feat_str.replace("esp-hal/", "\"esp-hal/").parse::<Value>().ok() {
+                                if let Some(new_str) = feat_str
+                                    .replace("esp-hal/", "\"esp-hal/")
+                                    .parse::<Value>()
+                                    .ok()
+                                {
                                     *feature = new_str;
                                     modified = true;
                                 }

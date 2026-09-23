@@ -224,10 +224,7 @@ async fn format_project(project: &ProjectInfo, verbose: bool) -> Result<TaskResu
     })
 }
 
-pub async fn clippy_all_projects(
-    projects: &[ProjectInfo],
-    verbose: bool,
-) -> Result<()> {
+pub async fn clippy_all_projects(projects: &[ProjectInfo], verbose: bool) -> Result<()> {
     println!("\n[CLIPPY] Running clippy on all ESP32 projects");
     println!("{}", "=".repeat(60));
 
@@ -280,7 +277,11 @@ pub async fn clippy_all_projects(
     if summary.warnings > 0 {
         println!("\nProjects with warnings:");
         for result in results.iter().filter(|r| !r.warnings.is_empty()) {
-            println!("  * {} ({} warnings)", result.project, result.warnings.len());
+            println!(
+                "  * {} ({} warnings)",
+                result.project,
+                result.warnings.len()
+            );
         }
     }
 

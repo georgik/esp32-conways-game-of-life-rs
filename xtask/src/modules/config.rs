@@ -50,10 +50,16 @@ pub async fn clean_deprecated_config(
         println!("Failed: {} projects", summary.failed);
     }
 
-    let changed_count = results.iter().filter(|r| r.success && !r.message.is_empty()).count();
+    let changed_count = results
+        .iter()
+        .filter(|r| r.success && !r.message.is_empty())
+        .count();
     if changed_count > 0 {
         println!("\nProjects with changes: {}", changed_count);
-        for result in results.iter().filter(|r| r.success && !r.message.is_empty()) {
+        for result in results
+            .iter()
+            .filter(|r| r.success && !r.message.is_empty())
+        {
             println!("  * {}", result.project);
         }
     }
@@ -104,10 +110,7 @@ async fn clean_project_config(
     let mut changes = Vec::new();
     let mut new_content = content.clone();
 
-    let deprecated_options = &[
-        "ESP_HAL_CONFIG_PSRAM_MODE",
-        "ESP_HAL_CONFIG_XTAL_FREQUENCY",
-    ];
+    let deprecated_options = &["ESP_HAL_CONFIG_PSRAM_MODE", "ESP_HAL_CONFIG_XTAL_FREQUENCY"];
 
     for option in deprecated_options {
         if new_content.contains(option) {

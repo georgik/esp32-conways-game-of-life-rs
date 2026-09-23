@@ -50,8 +50,8 @@ pub async fn discover_projects() -> Result<Vec<ProjectInfo>> {
     let current_dir = std::env::current_dir()?;
     let mut projects = Vec::new();
 
-    let mut entries = fs::read_dir(&current_dir)
-        .with_context(|| "Failed to read current directory")?;
+    let mut entries =
+        fs::read_dir(&current_dir).with_context(|| "Failed to read current directory")?;
 
     while let Some(entry) = entries.next().transpose()? {
         let path = entry.path();
