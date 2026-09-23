@@ -54,12 +54,14 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: Build + package
-    # Pinned to ubuntu-24.04 so the run does not silently migrate to Ubuntu 26.
+    # Pinned to ubuntu-24.04 so the run does not silently migrate to Ubuntu 26
+    # and so GitHub-hosted actions keep running on their bundled Node (no
+    # "Node.js 20 is being forced to run on Node.js 24" deprecation noise).
     runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install ESP toolchain
         run: |
@@ -70,13 +72,17 @@ jobs:
           source ~/export-esp.sh
 
       - name: Setup Rust stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-          targets: |
-            riscv32imac-unknown-none-elf
+        # `actions-rs/toolchain` was dropped: it is unmaintained, targets
+        # Node 20, emits the deprecated `set-output` command, and errors on the
+        # `targets` input. The ubuntu runner already ships rustup, so install
+        # the toolchain directly.
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --component rustfmt --component clippy
+          rustup target add \
+            riscv32imac-unknown-none-elf \
             riscv32imc-unknown-none-elf
+          rustup show
 
       - name: Setup ESP Xtensa toolchain
         uses: esp-rs/xtensa-toolchain@v1.5
@@ -97,7 +103,7 @@ jobs:
 
       - name: Upload per-board artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: flash-files
           # One directory per built project: pack-<board>/{Cargo.toml,.cargo/config.toml,target/<triple>/release/<elf>}
@@ -119,15 +125,22 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Download espbrew
+      - name: Download espbrew (arch-aware)
         run: |
           set -euo pipefail
-          # Download to the repo root ($GITHUB_WORKSPACE); espbrew is invoked by
-          # absolute path below so the cwd does not matter.
+          # The self-hosted runner may be x64 or arm; pick the matching
+          # espbrew release so we never land an amd64 binary on an arm64 host
+          # (that surfaces as an opaque "exec format error" mid-flash).
+          case "$(uname -m)" in
+            x86_64)  ESPBREW_ARCH="linux-amd64" ;;
+            aarch64) ESPBREW_ARCH="linux-arm64" ;;
+            *)       ESPBREW_ARCH="linux-amd64" ;;
+          esac
+          echo "Downloading espbrew-${ESPBREW_ARCH}"
           curl -fsSL \
-            "https://github.com/georgik/espbrew-go/releases/download/${ESPBREW_VERSION}/espbrew-linux-amd64" \
+            "https://github.com/georgik/espbrew-go/releases/download/${ESPBREW_VERSION}/espbrew-${ESPBREW_ARCH}" \
             -o espbrew
           chmod +x ./espbrew
           ./espbrew --version
@@ -135,7 +148,7 @@ jobs:
       - name: Download build artifacts
         # continue-on-error: the flash job runs even when the build job was
         # cancelled, in which case there is nothing to download.
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: flash-files
           path: flash-files
@@ -146,6 +159,10 @@ jobs:
           set -euo pipefail
 
           ESPBREW="$GITHUB_WORKSPACE/espbrew"
+          if [ ! -x "$ESPBREW" ]; then
+            echo "ERROR: espbrew binary missing at $ESPBREW (download step failed?)"
+            exit 1
+          fi
 
           # Read the board manifest: one "alias<TAB>project" line per board.
           # project defaults to alias when the two are identical.
@@ -159,32 +176,66 @@ jobs:
               continue
             fi
 
+            # The artifact MUST carry the three markers espbrew autodetects on:
+            # Cargo.toml, .cargo/config.toml, and the ELF under
+            # target/<triple>/release/. If the build/pack step shipped a partial
+            # artifact (e.g. only Cargo.toml) espbrew's RustESPDetector would
+            # find nothing and fail ambiguously — catch that here instead.
+            if [ ! -f "$artifact_dir/Cargo.toml" ] \
+               || [ ! -f "$artifact_dir/.cargo/config.toml" ]; then
+              echo "FAILED ${alias}: artifact missing Cargo.toml/.cargo/config.toml (pack step incomplete)"
+              exit 1
+            fi
+            elf=$(find "$artifact_dir/target" -type f \
+                    ! -name '*.d' ! -name '*.o' ! -name '*.rlib' \
+                    ! -name '*.rmeta' ! -name '*.a' 2>/dev/null | head -1)
+            if [ -z "$elf" ]; then
+              echo "FAILED ${alias}: artifact has no ELF under target/<triple>/release (build/pack incomplete)"
+              exit 1
+            fi
+
             echo ">>> Flashing ${alias} (project: ${project})"
-            # Run from inside the artifact dir so espbrew auto-detects the Rust
-            # project (Cargo.toml + .cargo/config.toml) and locates the ELF, then
-            # converts it to bootloader/partitions/app on the server.
-            # --filter-alias addresses the board by its espbrew cluster alias.
-            # --monitor-duration streams the serial console for boot verification.
-            # The single `flash` command has no --exit-on-error (that is a
-            # flash-batch flag), so we capture the output and fail on the panic
-            # marker "abort() was called" if the firmware crashes on boot.
-            output=$(
+
+            # 1) Flash. Run from inside the artifact dir so espbrew auto-detects
+            #    the Rust project (Cargo.toml + .cargo/config.toml), locates the
+            #    ELF, and has the cluster leader convert it to
+            #    bootloader/partitions/app. The single `flash` command has no
+            #    --exit-on-error (that is a flash-batch flag), so we fail on the
+            #    command's own exit code.
+            flash_output=$(
               cd "$artifact_dir"
               "$ESPBREW" --cluster "$ESPBREW_CLUSTER" \
                 --filter-alias "$alias" \
-                --monitor-duration 15 \
                 flash 2>&1
             )
-            rc=$?
-            echo "$output"
-            if [ "$rc" -ne 0 ]; then
-              echo "FAILED ${alias}: espbrew exited with code ${rc}"
+            flash_rc=$?
+            echo "$flash_output"
+            if [ "$flash_rc" -ne 0 ]; then
+              echo "FAILED ${alias}: espbrew flash exited with code ${flash_rc}"
               exit 1
             fi
-            if printf '%s' "$output" | grep -q "abort() was called"; then
+
+            # 2) Boot verification. Stream the serial console via the cluster
+            #    and fail if the firmware crashes: the panic handler prints
+            #    "abort() was called". `--exit-on-error` makes the monitor
+            #    command return non-zero when that pattern appears, and
+            #    --no-raw keeps it non-interactive under CI.
+            boot_output=$(
+              cd "$artifact_dir"
+              "$ESPBREW" --cluster "$ESPBREW_CLUSTER" \
+                --filter-alias "$alias" \
+                monitor --duration 15 \
+                --exit-on-error "abort() was called" \
+                --no-raw 2>&1
+            )
+            boot_rc=$?
+            echo "$boot_output"
+            if [ "$boot_rc" -ne 0 ]; then
               echo "FAILED ${alias}: firmware crashed on boot (abort() was called)"
               exit 1
             fi
+
+            echo "OK      ${alias}"
           done < <(awk '/^  - alias:/ {a=$3} /^    project:/ {print a "\t" $2}' boards.yaml)
 
           echo "All flashable boards done."

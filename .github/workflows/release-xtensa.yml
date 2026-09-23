@@ -31,10 +31,10 @@ env:
 jobs:
   xtensa-release:
     name: Xtensa Release (ESP32-S3 Projects)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install espup and set toolchain 1.90.0.0
         run: |

@@ -29,16 +29,18 @@ jobs:
 
   riscv-imac-release:
     name: RISC-V IMAC Release (ESP32-C6 Projects)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Rust for RISC-V IMAC
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: riscv32imac-unknown-none-elf
+        # `actions-rs/toolchain` is unmaintained (Node 20 + deprecated
+        # `set-output`); the runner ships rustup, so install directly.
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add riscv32imac-unknown-none-elf
+          rustup show
 
       - name: Build ESP32-C6 Project and collect assets
         run: |

@@ -27,16 +27,18 @@ env:
 jobs:
   riscv-imc-release:
     name: RISC-V IMC Release (ESP32-C3 Projects)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Rust for RISC-V IMC
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          target: riscv32imc-unknown-none-elf
+        # `actions-rs/toolchain` is unmaintained (Node 20 + deprecated
+        # `set-output`); the runner ships rustup, so install directly.
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add riscv32imc-unknown-none-elf
+          rustup show
 
       - name: Build ESP32-C3 Project and Collect Assets
         run: |

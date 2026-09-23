@@ -39,11 +39,14 @@ env:
 jobs:
   unified-build:
     name: Build All ESP32 Projects
-    runs-on: ubuntu-latest
-    
+    # Pinned to ubuntu-24.04 so the run does not silently migrate to Ubuntu 26
+    # and so GitHub-hosted actions keep running on their bundled Node (no
+    # "Node.js 20 is being forced to run on Node.js 24" deprecation noise).
+    runs-on: ubuntu-24.04
+
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install espup for ESP toolchain management
         run: |
@@ -53,13 +56,17 @@ jobs:
           source ~/export-esp.sh
 
       - name: Setup Rust stable toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-          targets: |
-            riscv32imac-unknown-none-elf
+        # `actions-rs/toolchain` was dropped: it is unmaintained, targets
+        # Node 20, emits the deprecated `set-output` command, and errors on the
+        # `targets` input. The ubuntu runner already ships rustup, so install
+        # the toolchain directly.
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --component rustfmt --component clippy
+          rustup target add \
+            riscv32imac-unknown-none-elf \
             riscv32imc-unknown-none-elf
+          rustup show
 
       - name: Setup ESP Xtensa toolchain
         uses: esp-rs/xtensa-toolchain@v1.5
@@ -99,7 +106,7 @@ jobs:
 
       - name: Upload build artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: esp32-build-artifacts
           path: artifacts/
