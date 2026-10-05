@@ -134,9 +134,14 @@ enum Commands {
     },
     /// Package the minimal espbrew flash artifact per project
     /// (Cargo.toml + .cargo/config.toml + target/<triple>/release/<elf>)
+    ///
+    /// --project <name> limits packaging to a single project (e.g. the board
+    /// targeted by CI), avoiding a scan of every board on disk.
     Pack {
         #[arg(long, short)]
         verbose: bool,
+        #[arg(long)]
+        project: Option<String>,
     },
     /// Build and serve WASM version
     ServeWasm {
@@ -226,7 +231,9 @@ async fn run_commands(
             fix_cargo_toml_quotes(&projects, dry_run, verbose).await
         }
         Commands::Clippy { verbose } => clippy_all_projects(&projects, verbose).await,
-        Commands::Pack { verbose } => pack_all_projects(&projects, verbose),
+        Commands::Pack { verbose, project } => {
+            pack_all_projects(&projects, verbose, project.as_deref())
+        }
         Commands::PinEspHal { dry_run, verbose } => {
             pin_incompatible_esp_hal(&projects, dry_run, verbose).await
         }

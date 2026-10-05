@@ -20,17 +20,31 @@ use std::path::{Path, PathBuf};
 
 /// Package every project that has a `Cargo.toml` and a successful release build.
 ///
-/// Each artifact is written to a sibling directory `pack-<project>` of the
-/// project (i.e. at the repo root, next to the project itself) so the workflow
-/// can upload one artifact per board.
-pub fn pack_all_projects(projects: &[ProjectInfo], verbose: bool) -> Result<()> {
+/// When `project_filter` is set, only the project whose name matches is packed
+/// (used by CI to target a single board). Each artifact is written to a sibling
+/// directory `pack-<project>` of the project (i.e. at the repo root, next to the
+/// project itself) so the workflow can upload one artifact per board.
+pub fn pack_all_projects(
+    projects: &[ProjectInfo],
+    verbose: bool,
+    project_filter: Option<&str>,
+) -> Result<()> {
     println!("\n[PACK] Packaging minimal espbrew flash artifacts");
+    if let Some(filter) = project_filter {
+        println!("Filtering to project: {filter}");
+    }
     println!("{}", "=".repeat(60));
 
     let mut packed = 0usize;
     let mut skipped = 0usize;
 
     for project in projects.iter().filter(|p| p.has_cargo_toml) {
+        if let Some(filter) = project_filter {
+            if project.name != filter {
+                continue;
+            }
+        }
+
         let out_dir = match project.path.parent() {
             Some(parent) => parent.join(format!("pack-{}", project.name)),
             None => PathBuf::from(format!("pack-{}", project.name)),
