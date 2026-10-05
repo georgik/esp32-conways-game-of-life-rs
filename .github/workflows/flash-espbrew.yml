@@ -62,8 +62,12 @@ jobs:
         run: |
           set -euo pipefail
           # ESP toolchain (xtensa-esp32s3) used by the esp32-s3-box-3 firmware.
-          cargo install espup --locked
-          espup install --toolchain-version 1.90.0.0
+          # Install espup from its prebuilt binary — `cargo install espup`
+          # recompiles it from source on every run, which is slow and pointless.
+          curl -fsSL -o espup \
+            "https://github.com/esp-rs/espup/releases/download/v0.18.0/espup-x86_64-unknown-linux-gnu"
+          chmod +x espup
+          ./espup install --toolchain-version 1.90.0.0
           source ~/export-esp.sh
           # Stable toolchain + wasm32 target for the browser (wasm) build.
           rustup toolchain install stable --profile minimal
@@ -71,7 +75,19 @@ jobs:
           rustup target add wasm32-unknown-unknown
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --locked
+        # Prebuilt binary (0.2.100, matching the wasm-bindgen crate version)
+        # instead of `cargo install`, which recompiles from source each run.
+        # The wasm build is currently disabled (see the commented-out "Build
+        # WASM" step), so this is only needed once WASM is re-enabled — but it
+        # is cheap to fetch and keeps the step correct for then.
+        run: |
+          set -euo pipefail
+          curl -fsSL -o wb.tar.gz \
+            "https://github.com/rustwasm/wasm-bindgen/releases/download/0.2.100/wasm-bindgen-0.2.100-x86_64-unknown-linux-musl.tar.gz"
+          tar xzf wb.tar.gz
+          bin=$(find . -maxdepth 2 -name wasm-bindgen-cli -type f | head -1)
+          cp "$bin" ./wasm-bindgen-cli && chmod +x ./wasm-bindgen-cli
+          ./wasm-bindgen-cli --version
 
       - name: Build esp32-s3-box-3 firmware
         run: |
@@ -162,22 +178,27 @@ jobs:
             --duration "${SNAP_DURATION}"
 
       - name: Package snapshot
+        # Runs in the repo root: each step gets its own fresh shell, so the
+        # `cd firmware` from the previous step does NOT persist here.
+        #
+        # espbrew snap ran inside firmware/ with --save-dir snap-out, so the
+        # captured files live in firmware/snap-out/ as a FLAT layout
+        # (snap-*.jpg/.json/.log) - no TIMESTAMP/ subdir.
         run: |
           set -euo pipefail
-          mkdir -p snap-out
-          # snap-out/TIMESTAMP/ holds snap-*.jpg/.json/.log
-          latest=$(ls -dt snap-out/*/ 2>/dev/null | head -1)
-          if [ -n "${latest}" ]; then
-            ( cd "${latest}" && zip -qr -r ../snapshot.zip . )
-          else
-            ( cd snap-out && zip -qr -r ../snapshot.zip . )
-          fi
+          snap_dir="firmware/snap-out"
+          mkdir -p "${snap_dir}"
+          # Zip the captured files into repo-root snapshot.zip. The deploy
+          # job searches the archive recursively, so the firmware/ prefix is
+          # harmless. (No `ls -dt` globbing: the flat layout has no subdir,
+          # and a failed glob under `pipefail`+`set -e` used to abort here.)
+          zip -qr -r snapshot.zip "${snap_dir}"
 
       - name: Upload snapshot
         uses: actions/upload-artifact@v4
         with:
           name: snapshot
-          path: snap-out/snapshot.zip
+          path: snapshot.zip
           retention-days: 30
 
   # ---------------------------------------------------------------------------
