@@ -97,10 +97,17 @@ jobs:
       - name: Upload esp32-s3-box-3 firmware
         # Minimal espbrew-ready project (Cargo.toml, .cargo/config.toml and
         # target/<triple>/release ELF) so espbrew auto-discovers it on the runner.
+        #
+        # IMPORTANT: include-hidden-files MUST be true. espbrew's autodetect
+        # keys on the dot-directory .cargo/config.toml, and upload-artifact@v4
+        # drops dot-files/dirs by default (include-hidden-files defaults to
+        # false). Without it the artifact has Cargo.toml + ELF but no .cargo/,
+        # so espbrew logs "no supported project detected".
         uses: actions/upload-artifact@v4
         with:
           name: esp32-s3-box-3-firmware
           path: pack-esp32-s3-box-3/
+          include-hidden-files: true
           retention-days: 1
 
       # WASM build artifact disabled for now; re-enable later.
