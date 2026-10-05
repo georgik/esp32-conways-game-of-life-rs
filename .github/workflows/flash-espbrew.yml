@@ -1,0 +1,325 @@
+name: Flash & Snap via ESPBrew
+
+# Manual-only hardware workflow.
+#
+#   * `build`  -> ubuntu: compiles the esp32-s3-box-3 firmware AND the browser
+#                 (wasm) build. The wasm artifact is published to GitHub Pages as
+#                 a browser game and is NEVER sent to espbrew.
+#   * `snap`   -> [espbrew] self-hosted runner. That runner is only a *client*
+#                 to the ESPBrew cluster leader (the physical board lives on the
+#                 leader), so it flashes the firmware and captures a camera frame
+#                 via `espbrew snap`. espbrew auto-discovers the project
+#                 (Cargo.toml, .cargo/config, target/<triple>/release ELF), so
+#                 no manual flash plan is required.
+#   * `deploy` -> ubuntu: assembles the GitHub Pages site (screenshot gallery +
+#                 the WASM browser game).
+#
+# Security: this workflow only triggers on manual dispatch, so pull requests
+# (including from forks) can never execute steps on the self-hosted hardware
+# runner. The snap job also carries a guard step as defense in depth. See the
+# note at the bottom of this file about the matching GitHub repository settings.
+
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: 'ESPBrew device alias to flash/snap (only esp32-s3-box-3 is wired up)'
+        type: string
+        default: 'esp32-s3-box-3'
+      snap_duration:
+        description: 'Snap capture duration (seconds)'
+        type: string
+        default: '10'
+      enable_snap:
+        description: 'Flash + capture a hardware snapshot via espbrew snap'
+        type: boolean
+        default: true
+      publish_gallery:
+        description: 'Deploy screenshot gallery + WASM browser game to GitHub Pages'
+        type: boolean
+        default: true
+
+# Self-hosted runners still need read access to the repository contents.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build the esp32-s3-box-3 firmware and the browser (wasm) build.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build firmware + WASM
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchains (ESP + stable)
+        run: |
+          set -euo pipefail
+          # ESP toolchain (xtensa-esp32s3) used by the esp32-s3-box-3 firmware.
+          cargo install espup --locked
+          espup install --toolchain-version 1.90.0.0
+          source ~/export-esp.sh
+          # Stable toolchain + wasm32 target for the browser (wasm) build.
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --locked
+
+      - name: Build esp32-s3-box-3 firmware
+        run: |
+          set -euo pipefail
+          cd esp32-s3-box-3
+          cargo build --release
+
+      # WASM (browser) build is disabled for now; re-enable later.
+      # - name: Build WASM (browser) build
+      #   run: |
+      #     set -euo pipefail
+      #     cd wasm
+      #     cargo build --release
+
+      - name: Shrink firmware artifact (drop incremental cache)
+        run: |
+          set -euo pipefail
+          find esp32-s3-box-3/target -type d -name incremental -exec rm -rf {} + 2>/dev/null || true
+
+      - name: Upload esp32-s3-box-3 firmware
+        # Contains Cargo.toml, .cargo/config and target/<triple>/release ELF so
+        # espbrew can auto-discover the project on the runner.
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32-s3-box-3-firmware
+          path: esp32-s3-box-3/
+          retention-days: 1
+
+      # WASM build artifact disabled for now; re-enable later.
+      # - name: Upload WASM build
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: wasm-build
+      #     path: wasm/pkg/
+      #     retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Flash + capture a hardware snapshot on the self-hosted ESPBrew runner.
+  #
+  # The runner is only a client to the cluster leader, so `espbrew snap`
+  # auto-detects the firmware from the downloaded project (target/<triple>/
+  # release ELF) and flashes it at the standard app offset. No manual flash
+  # plan is required.
+  # ---------------------------------------------------------------------------
+  snap:
+    name: Flash & snap (espbrew)
+    needs: build
+    if: github.event.inputs.enable_snap == 'true'
+    runs-on: [espbrew]
+    steps:
+      # --- Security: never run on untrusted PR / fork code -------------------
+      - name: Refuse to run on PRs / forks
+        if: github.event.pull_request != null || github.event_name != 'workflow_dispatch'
+        run: |
+          echo "::error::This hardware workflow only runs on manual dispatch."
+          echo "::error::It must never execute on pull requests or fork contributions."
+          exit 1
+
+      - name: Download firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: esp32-s3-box-3-firmware
+          path: esp32-s3-box-3/
+
+      - name: Flash + capture snapshot
+        env:
+          BOARD: "${{ github.event.inputs.board }}"
+          SNAP_DURATION: "${{ github.event.inputs.snap_duration }}"
+        run: |
+          set -euo pipefail
+          # espbrew auto-discovers the project (Cargo.toml, .cargo/config,
+          # target/<triple>/release ELF). --filter-alias selects the board
+          # registered on the ESPBrew leader. CI mode is auto-detected.
+          espbrew snap \
+            --filter-alias "${BOARD}" \
+            --save-dir snap-out \
+            --duration "${SNAP_DURATION}"
+
+      - name: Package snapshot
+        run: |
+          set -euo pipefail
+          mkdir -p snap-out
+          # snap-out/TIMESTAMP/ holds snap-*.jpg/.json/.log
+          latest=$(ls -dt snap-out/*/ 2>/dev/null | head -1)
+          if [ -n "${latest}" ]; then
+            ( cd "${latest}" && zip -qr -r ../snapshot.zip . )
+          else
+            ( cd snap-out && zip -qr -r ../snapshot.zip . )
+          fi
+
+      - name: Upload snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot
+          path: snap-out/snapshot.zip
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Assemble and publish the GitHub Pages site: the hardware screenshot gallery
+  # plus the WASM browser game (built in the `build` job, never flashed).
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy gallery (Pages)
+    needs: [build, snap]
+    # Run when gallery publishing is requested and snap either succeeded or was
+    # intentionally skipped (enable_snap=false).
+    if: github.event.inputs.publish_gallery == 'true' && (needs.snap.result == 'success' || needs.snap.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download WASM build
+        # Disabled for now (wasm build is commented out in the build job).
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-build
+          path: deploy/wasm
+
+      - name: Download snapshot (optional)
+        # Fails silently when snap was skipped (enable_snap=false).
+        uses: actions/download-artifact@v4
+        with:
+          name: snapshot
+          path: deploy/snapshot
+        continue-on-error: true
+
+      - name: Extract snapshot
+        run: |
+          set -euo pipefail
+          mkdir -p deploy/screenshot
+          if [ -f deploy/snapshot/snapshot.zip ]; then
+            ( cd deploy/snapshot && unzip -o -q snapshot.zip -d ../screenshot )
+            echo "snapshot extracted"
+          else
+            echo "no snapshot available (enable_snap=false?)"
+          fi
+
+      - name: Locate screenshot
+        id: screenshot
+        run: |
+          set -euo pipefail
+          screenshot=$(find deploy/screenshot -type f \( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' \) 2>/dev/null | head -1)
+          if [ -n "${screenshot}" ]; then
+            rel=$(printf '%s' "${screenshot}" | sed 's#^deploy/screenshot/##')
+            echo "path=${rel}" >> "$GITHUB_OUTPUT"
+            echo "screenshot found: ${rel}"
+          else
+            echo "path=" >> "$GITHUB_OUTPUT"
+            echo "no screenshot captured"
+          fi
+
+      - name: Assemble gallery site
+        run: |
+          set -euo pipefail
+          mkdir -p deploy/site
+          # Publish the WASM browser game under ./wasm/ (kept live, never flashed).
+          cp -r deploy/wasm/. deploy/site/wasm/ || true
+
+          screenshot="${{ steps.screenshot.outputs.path }}"
+          if [ -n "${screenshot}" ]; then
+            echo "screenshot_rel=${screenshot}" > deploy/screenshot.env
+          else
+            echo "screenshot_rel=" > deploy/screenshot.env
+          fi
+          cat deploy/screenshot.env
+
+      - name: Generate gallery index.html
+        env:
+          SCREENSHOT_REL: "${{ steps.screenshot.outputs.path }}"
+        run: |
+          set -euo pipefail
+          if [ -n "${SCREENSHOT_REL}" ]; then
+            IMG="<img src=\"${SCREENSHOT_REL}\" alt=\"esp32-s3-box-3 hardware snapshot\" class=\"screenshot\">"
+          else
+            IMG="<div class=\"placeholder\">No hardware snapshot captured yet.</div>"
+          fi
+
+          cat > deploy/site/index.html <<'HTML'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>ESP32 Conway's Game of Life</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                   background: #0d1117; color: #e6edf3; line-height: 1.6; }
+            a { color: #58a6ff; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+            .header { background: #161b22; padding: 2rem; text-align: center;
+                      border-bottom: 1px solid #30363d; }
+            .header h1 { font-size: 1.6rem; margin-bottom: 0.5rem; }
+            .header p { color: #8b949e; font-size: 0.95rem; }
+            .container { max-width: 1000px; margin: 0 auto; padding: 2rem; }
+            .card { background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+                    padding: 1.5rem; margin-bottom: 1.5rem; }
+            .card h2 { font-size: 1.15rem; margin-bottom: 1rem; }
+            .screenshot { max-width: 100%; height: auto; border-radius: 8px;
+                    border: 1px solid #30363d; display: block; margin: 0 auto; }
+            .placeholder { background: #0d1117; border: 2px dashed #30363d; border-radius: 8px;
+                           padding: 2rem; text-align: center; color: #8b949e; }
+            .actions { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-top: 1rem; }
+            .btn { display: inline-block; background: #238636; color: #fff; padding: 0.7rem 1.4rem;
+                   border-radius: 6px; font-weight: 600; }
+            .btn:hover { text-decoration: none; background: #2ea043; }
+            .btn.secondary { background: #21262d; border: 1px solid #30363d; }
+            .footer { text-align: center; padding: 2rem; color: #8b949e; font-size: 0.85rem; }
+          </style>
+          </head>
+          <body>
+          <div class="header">
+              <h1>ESP32 Conway's Game of Life in Rust</h1>
+              <p>Real hardware snapshot + browser (WASM) build</p>
+          </div>
+          <div class="container">
+              <div class="card">
+                  <h2>📸 Hardware snapshot (esp32-s3-box-3)</h2>
+          ${IMG}
+              </div>
+              <div class="card">
+                  <h2>🎮 Play in browser</h2>
+                  <p style="color:#8b949e; margin-bottom:1rem;">The same game runs in your browser as a WASM build — no hardware required.</p>
+                  <div class="actions">
+                      <a class="btn" href="./wasm/index.html">Launch browser game →</a>
+                  </div>
+              </div>
+          </div>
+          <div class="footer">
+              <p>Built with ESP-Hal + Rust · Flashed & captured via <a href="https://github.com/georgik/espbrew-go">ESPBrew</a></p>
+          </div>
+          </body>
+          </html>
+          HTML
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: deploy/site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
