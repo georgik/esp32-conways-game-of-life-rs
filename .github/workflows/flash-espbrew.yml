@@ -6,9 +6,11 @@ name: Flash & Snap via ESPBrew
 #                 `pack` command then produces a minimal espbrew-ready artifact
 #                 (Cargo.toml + .cargo/config.toml +
 #                 target/<triple>/release/<elf>) that espbrew auto-discovers on
-#                 the runner - a few MB instead of the full target tree. The
-#                 browser (wasm) build is disabled for now; when re-enabled it is
-#                 published to GitHub Pages and is NEVER sent to espbrew.
+#                 the runner - a few MB instead of the full target tree.
+#   * `wasm`   -> ubuntu: builds the browser (wasm) build IN PARALLEL with
+#                 `build` (it needs only stable + wasm32, no xtensa). The result
+#                 is published to GitHub Pages in `deploy` and is NEVER sent to
+#                 espbrew.
 #   * `snap`   -> [espbrew] self-hosted runner. That runner is only a *client*
 #                 to the ESPBrew cluster leader (the physical board lives on the
 #                 leader), so it flashes the firmware and captures a camera frame
@@ -16,7 +18,7 @@ name: Flash & Snap via ESPBrew
 #                 (Cargo.toml, .cargo/config, target/<triple>/release ELF), so
 #                 no manual flash plan is required.
 #   * `deploy` -> ubuntu: assembles the GitHub Pages site (screenshot gallery +
-#                 the WASM browser game).
+#                 the WASM browser build).
 #
 # Security: this workflow only triggers on manual dispatch, so pull requests
 # (including from forks) can never execute steps on the self-hosted hardware
@@ -39,7 +41,7 @@ on:
         type: boolean
         default: true
       publish_gallery:
-        description: 'Deploy screenshot gallery + WASM browser game to GitHub Pages'
+        description: 'Deploy screenshot gallery + WASM browser build to GitHub Pages'
         type: boolean
         default: true
 
@@ -49,16 +51,17 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build the esp32-s3-box-3 firmware and the browser (wasm) build.
+  # Build the esp32-s3-box-3 firmware. (The browser/wasm build runs in the
+  # parallel `wasm` job below, not here.)
   # ---------------------------------------------------------------------------
   build:
-    name: Build firmware + WASM
+    name: Build firmware
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install toolchains (ESP + stable)
+      - name: Install ESP toolchain
         run: |
           set -euo pipefail
           # ESP toolchain (xtensa-esp32s3) used by the esp32-s3-box-3 firmware.
@@ -69,34 +72,9 @@ jobs:
           chmod +x espup
           ./espup install --toolchain-version 1.90.0.0
           source ~/export-esp.sh
-          # Stable toolchain + wasm32 target for the browser (wasm) build.
+          # Stable toolchain for cargo and the xtask pack step below.
           rustup toolchain install stable --profile minimal
           rustup default stable
-          rustup target add wasm32-unknown-unknown
-
-      - name: Install wasm-bindgen-cli
-        # Prebuilt binary (0.2.100, matching the wasm-bindgen crate version)
-        # instead of `cargo install`, which recompiles from source each run.
-        # The wasm build is currently disabled (see the commented-out "Build
-        # WASM" step), so this is only needed once WASM is re-enabled — but it
-        # is cheap to fetch and keeps the step correct for then.
-        #
-        # NOTE: the musl release tarball ships the CLI as ./wasm-bindgen (the
-        # old ./wasm-bindgen-cli name was dropped), sitting at the TOP LEVEL of
-        # the extracted dir. We locate it and copy it to the conventional
-        # ./wasm-bindgen-cli name so downstream steps can rely on it.
-        run: |
-          set -euo pipefail
-          curl -fsSL -o wb.tar.gz \
-            "https://github.com/rustwasm/wasm-bindgen/releases/download/0.2.100/wasm-bindgen-0.2.100-x86_64-unknown-linux-musl.tar.gz"
-          tar xzf wb.tar.gz
-          bin="$(find . -maxdepth 2 -name wasm-bindgen -type f | head -1)"
-          if [ -z "${bin}" ]; then
-            echo "::error::could not locate the wasm-bindgen binary in the tarball" >&2
-            exit 1
-          fi
-          cp "${bin}" ./wasm-bindgen-cli && chmod +x ./wasm-bindgen-cli
-          ./wasm-bindgen-cli --version
 
       - name: Build esp32-s3-box-3 firmware
         run: |
@@ -104,18 +82,11 @@ jobs:
           cd esp32-s3-box-3
           cargo build --release
 
-      # WASM (browser) build is disabled for now; re-enable later.
-      # - name: Build WASM (browser) build
-      #   run: |
-      #     set -euo pipefail
-      #     cd wasm
-      #     cargo build --release
-
       # Build the xtask "pack" artifact: a minimal, espbrew-ready project
       # containing exactly Cargo.toml + .cargo/config.toml +
       # target/xtensa-esp32s3-none-elf/release/<elf>. This is what espbrew's
       # autodetect keys on, and it is a few MB instead of the full 180+ MB
-      # target tree.
+      # target tree. Runs on the stable host toolchain (no xtensa needed).
       - name: Package espbrew artifact (cargo xtask pack)
         run: cargo xtask pack --project esp32-s3-box-3 --verbose
 
@@ -135,13 +106,94 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
-      # WASM build artifact disabled for now; re-enable later.
-      # - name: Upload WASM build
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: wasm-build
-      #     path: wasm/pkg/
-      #     retention-days: 1
+  # ---------------------------------------------------------------------------
+  # Build the browser (wasm) build in PARALLEL with the firmware above. It needs
+  # only the stable toolchain + wasm32 target (no xtensa), so it runs on a plain
+  # ubuntu runner alongside the [espbrew] flash job. The WASM build is NEVER sent
+  # to espbrew — it is published to GitHub Pages in the `deploy` job only.
+  # ---------------------------------------------------------------------------
+  wasm:
+    name: Build WASM browser build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain + wasm32 target
+        run: |
+          set -euo pipefail
+          # WASM needs only stable + wasm32 (no xtensa), so it does not touch the
+          # board toolchain and can run in parallel with the firmware build.
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      - name: Build WASM library (wasm32)
+        run: |
+          set -euo pipefail
+          cd wasm
+          # build.rs is a no-op for the wasm32 target, so this only produces the
+          # .wasm (it deliberately does NOT build the native serve bin).
+          cargo build --lib --target wasm32-unknown-unknown --release
+
+      - name: Install matching wasm-bindgen-cli
+        # The CLI schema version must EXACTLY match the wasm-bindgen crate used
+        # to build the .wasm, or wasm-bindgen refuses to run. Cargo.lock is not
+        # committed, so we read the resolved version at build time and fetch the
+        # matching prebuilt CLI instead of `cargo install` (which rebuilds from
+        # source each run).
+        #
+        # NOTE: the musl release tarball ships the CLI as ./wasm-bindgen (the
+        # old ./wasm-bindgen-cli name was dropped), sitting at the TOP LEVEL of
+        # the extracted dir. We locate it and copy it, then put the repo root on
+        # PATH so the packaging step can call it after `cd wasm`.
+        id: wb
+        run: |
+          set -euo pipefail
+          wb_version="$(grep -A1 'name = "wasm-bindgen"' wasm/Cargo.lock \
+            | awk '/version =/{gsub(/"/, "", $3); print $3; exit}')"
+          if [ -z "${wb_version}" ]; then
+            echo "::error::could not resolve wasm-bindgen version from wasm/Cargo.lock" >&2
+            exit 1
+          fi
+          echo "version=${wb_version}" >> "$GITHUB_OUTPUT"
+          cd /tmp
+          curl -fsSL -o wb.tar.gz \
+            "https://github.com/rustwasm/wasm-bindgen/releases/download/${wb_version}/wasm-bindgen-${wb_version}-x86_64-unknown-linux-musl.tar.gz"
+          tar xzf wb.tar.gz
+          bin="$(find . -maxdepth 2 -name wasm-bindgen -type f | head -1)"
+          if [ -z "${bin}" ]; then
+            echo "::error::could not locate the wasm-bindgen binary in the tarball" >&2
+            exit 1
+          fi
+          cp "${bin}" ./wasm-bindgen-cli && chmod +x ./wasm-bindgen-cli
+          ./wasm-bindgen-cli --version
+          # Repo root (where we just installed wasm-bindgen-cli) on PATH.
+          echo "$(pwd)" >> "$GITHUB_PATH"
+
+      - name: Package with wasm-bindgen
+        run: |
+          set -euo pipefail
+          cd wasm
+          # Emit pkg/ (js + .wasm). The committed pkg/index.html — the page that
+          # is served from Pages — is preserved by wasm-bindgen (it never deletes
+          # files it does not manage), so it survives into the artifact.
+          wasm-bindgen-cli --target web --out-dir pkg \
+            target/wasm32-unknown-unknown/release/wasm_conways_game_of_life.wasm
+          # Fail loud if the served page is somehow absent (e.g. a future
+          # wasm-bindgen that clears the out-dir), rather than shipping a page
+          # that 404s on the gallery link.
+          if [ ! -f pkg/index.html ]; then
+            echo "::error::pkg/index.html is missing after wasm-bindgen" >&2
+            exit 1
+          fi
+
+      - name: Upload WASM build
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-build
+          path: wasm/pkg/
+          retention-days: 1
 
   # ---------------------------------------------------------------------------
   # Flash + capture a hardware snapshot on the self-hosted ESPBrew runner.
@@ -200,11 +252,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Assemble and publish the GitHub Pages site: the hardware screenshot gallery
-  # plus the WASM browser game (built in the `build` job, never flashed).
+  # plus the WASM browser build (built in the parallel `wasm` job, never flashed).
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy gallery (Pages)
-    needs: [build, snap]
+    needs: [build, wasm, snap]
     # Run when gallery publishing is requested and snap either succeeded or was
     # intentionally skipped (enable_snap=false).
     if: github.event.inputs.publish_gallery == 'true' && (needs.snap.result == 'success' || needs.snap.result == 'skipped')
@@ -221,8 +273,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Download WASM build
-        # Disabled for now (wasm build is commented out in the build job).
-        continue-on-error: true
+        # The wasm job (below) always uploads this; deploy needs it, so it is
+        # present. Downloading it makes `deploy/site/wasm/` available for Pages.
         uses: actions/download-artifact@v4
         with:
           name: wasm-build
@@ -251,9 +303,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p deploy/site
-          # Publish the WASM browser game under ./wasm/ (kept live, never
-          # flashed). Disabled for now; harmless when the artifact is absent.
-          cp -r deploy/wasm/. deploy/site/wasm/ || true
+          # Publish the WASM browser build under ./wasm/ (kept live, never
+          # flashed). The wasm job uploads it as the `wasm-build` artifact, so
+          # this is present whenever deploy runs.
+          cp -r deploy/wasm/. deploy/site/wasm/
 
       - name: Locate and stage screenshot
         id: screenshot
