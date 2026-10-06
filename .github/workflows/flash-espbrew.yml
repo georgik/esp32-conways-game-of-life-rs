@@ -418,34 +418,17 @@ jobs:
                 --zip "../snapshots/$board.zip" \
                 --duration "$SNAP_DURATION" )
 
-      - name: Collect snapshots
-        # Runs after the matrix on the same runner, so it sees every board's
-        # snapshot zip and flattens the frames into a single screenshot set.
-        #
-        # ubuntu-26.04 runners do not put `unzip` or `python3` on PATH by
-        # default: Python ships as a package but must be added via
-        # setup-python, and `unzip` is installed but not on PATH. Install
-        # unzip via apt so extraction is deterministic, then flatten every
-        # board's frames (-j) into the single screenshots/ directory.
-        if: always()
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y unzip
-          rm -rf screenshots && mkdir -p screenshots
-          shopt -s nullglob
-          for z in snapshots/*.zip; do
-            unzip -o -j "$z" -d screenshots
-          done
-          echo "Collected screenshots:"
-          ls -la screenshots/ || true
-
-      - name: Upload gallery screenshots
-        if: hashFiles('screenshots/**') != ''
+      - name: Upload snapshot zips
+        # Upload the raw espbrew snapshot zips (one per board) so the gallery
+        # deploy job can expand them. File extraction is intentionally done on
+        # the GitHub-hosted deploy runner, NOT on this self-hosted hardware
+        # runner: the espbrew runner exists only to flash + capture, so it must
+        # not depend on apt/unzip or do any file manipulation.
+        if: hashFiles('snapshots/*.zip') != ''
         uses: actions/upload-artifact@v7
         with:
-          name: gallery-screenshots
-          path: screenshots/
+          name: gallery-zips
+          path: snapshots/
           retention-days: 30
 
   # ---------------------------------------------------------------------------
@@ -478,14 +461,33 @@ jobs:
           name: wasm-build
           path: deploy/wasm
 
-      - name: Download gallery screenshots
+      - name: Download snapshot zips
         # Fails silently when nothing was snapshotted (enable_snap=false or the
         # runner produced no frames).
         uses: actions/download-artifact@v7
         with:
-          name: gallery-screenshots
-          path: deploy/site/screenshots
+          name: gallery-zips
+          path: deploy/site/zips
         continue-on-error: true
+
+      - name: Extract snapshot zips
+        # Expand every board's snapshot zip into the screenshots dir. This runs
+        # on the GitHub-hosted ubuntu runner, which is where all file
+        # manipulation now lives (not on the espbrew hardware runner). unzip is
+        # not on PATH by default on ubuntu-26.04, so install it via apt.
+        # (-j flattens every board's frames into the single screenshots/ dir,
+        # matching the previous behavior the gallery assembly relied on.)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip
+          mkdir -p deploy/site/screenshots
+          shopt -s nullglob
+          for z in deploy/site/zips/*.zip; do
+            unzip -o -j "$z" -d deploy/site/screenshots
+          done
+          echo "Extracted snapshot frames:"
+          ls -la deploy/site/screenshots/ || true
 
       - name: Assemble gallery (per-board cards)
         env:
