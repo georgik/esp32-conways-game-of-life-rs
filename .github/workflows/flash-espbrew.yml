@@ -56,7 +56,9 @@ jobs:
   # ---------------------------------------------------------------------------
   build:
     name: Build firmware
-    runs-on: ubuntu-latest
+    # Pinned to ubuntu-26.04 ahead of the ubuntu-latest migration (2026-10-19)
+    # so we validate the toolchain on the upcoming base image.
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -114,7 +116,8 @@ jobs:
   # ---------------------------------------------------------------------------
   wasm:
     name: Build WASM browser build
-    runs-on: ubuntu-latest
+    # Pinned to ubuntu-26.04 ahead of the ubuntu-latest migration (2026-10-19).
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -269,7 +272,8 @@ jobs:
     # Run when gallery publishing is requested and snap either succeeded or was
     # intentionally skipped (enable_snap=false).
     if: github.event.inputs.publish_gallery == 'true' && (needs.snap.result == 'success' || needs.snap.result == 'skipped')
-    runs-on: ubuntu-latest
+    # Pinned to ubuntu-26.04 ahead of the ubuntu-latest migration (2026-10-19).
+    runs-on: ubuntu-26.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
