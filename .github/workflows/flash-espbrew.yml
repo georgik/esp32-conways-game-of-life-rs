@@ -2,11 +2,13 @@ name: Flash & Snap via ESPBrew
 
 # Manual-only hardware workflow.
 #
-#   * `build`  -> ubuntu: compiles the esp32-s3-box-3 firmware. The xtask
-#                 `pack` command then produces a minimal espbrew-ready artifact
-#                 (Cargo.toml + .cargo/config.toml +
-#                 target/<triple>/release/<elf>) that espbrew auto-discovers on
-#                 the runner - a few MB instead of the full target tree.
+#   * `build`  -> ubuntu: compiles every selected board and packages a minimal
+#                 espbrew-ready artifact per board (`cargo xtask pack` produces
+#                 pack-<board>/{Cargo.toml,.cargo/config.toml,
+#                 target/<triple>/release/<elf>}). Toolchains are auto-detected
+#                 from each board's rust-toolchain.toml, so an xtensa board and a
+#                 riscv board never share a toolchain install and can build in
+#                 parallel.
 #   * `wasm`   -> ubuntu: builds the browser (wasm) build IN PARALLEL with
 #                 `build` (it needs only stable + wasm32, no xtensa). The result
 #                 is published to GitHub Pages in `deploy` and is NEVER sent to
@@ -14,11 +16,20 @@ name: Flash & Snap via ESPBrew
 #   * `snap`   -> [espbrew] self-hosted runner. That runner is only a *client*
 #                 to the ESPBrew cluster leader (the physical board lives on the
 #                 leader), so it flashes the firmware and captures a camera frame
-#                 via `espbrew snap`. espbrew auto-discovers the project
-#                 (Cargo.toml, .cargo/config, target/<triple>/release ELF), so
-#                 no manual flash plan is required.
-#   * `deploy` -> ubuntu: assembles the GitHub Pages site (screenshot gallery +
-#                 the WASM browser build).
+#                 via `espbrew snap`. espbrew auto-detects the project from the
+#                 downloaded pack-<board>, so no manual flash plan is required.
+#   * `deploy` -> ubuntu: assembles the GitHub Pages site (a per-board screenshot
+#                 gallery + the WASM browser build). Only the screenshots that
+#                 were actually captured are staged, so a partial run still
+#                 publishes a correct gallery.
+#
+# Board selection:
+#
+#   The `boards` input is a comma-separated list of project directories. Leave it
+#   at the default to build/flash every registered board; set it to a single
+#   board to fine-tune just that one. The list mirrors boards.yaml (the single
+#   source of truth for the self-hosted flash job) and will be derived from it
+#   automatically once the per-board template lands.
 #
 # Security: this workflow only triggers on manual dispatch, so pull requests
 # (including from forks) can never execute steps on the self-hosted hardware
@@ -28,14 +39,10 @@ name: Flash & Snap via ESPBrew
 on:
   workflow_dispatch:
     inputs:
-      board:
-        description: 'ESPBrew device alias to flash/snap (only esp32-s3-box-3 is wired up)'
+      boards:
+        description: 'Comma-separated project dirs to build/flash (default: all registered boards)'
         type: string
-        default: 'esp32-s3-box-3'
-      snap_duration:
-        description: 'Snap capture duration (seconds)'
-        type: string
-        default: '10'
+        default: 'esp32-s3-box-3, esp32-s3-lcd-ev-board, m5stack-atom-s3, m5stack-atom-s3r, m5stack-core2, waveshare-esp32-s3-touch-lcd-1_28'
       enable_snap:
         description: 'Flash + capture a hardware snapshot via espbrew snap'
         type: boolean
@@ -44,6 +51,10 @@ on:
         description: 'Deploy screenshot gallery + WASM browser build to GitHub Pages'
         type: boolean
         default: true
+      snap_duration:
+        description: 'Snap capture duration (seconds)'
+        type: string
+        default: '10'
 
 # Self-hosted runners still need read access to the repository contents.
 permissions:
@@ -51,83 +62,168 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build the esp32-s3-box-3 firmware. (The browser/wasm build runs in the
-  # parallel `wasm` job below, not here.)
+  # Build + package the selected boards. One matrix entry per board; each entry
+  # builds and packs its own board. Toolchains are installed once, up-front,
+  # based on what the selected boards need (see the "Install toolchains" step).
   # ---------------------------------------------------------------------------
   build:
-    name: Build firmware
-    # Pinned to ubuntu-26.04 ahead of the ubuntu-latest migration (2026-10-19)
-    # so we validate the toolchain on the upcoming base image.
+    name: Build + package
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install ESP toolchain
-        # espup resolves the Xtensa Rust toolchain by querying the GitHub API
-        # (api.github.com/repos/esp-rs/rust-build/releases/latest). Unauthenticated
-        # API calls are rate-limited to 60 requests/hour per egress IP, and
-        # GitHub-hosted runners share those IPs across many workflows — so the
-        # budget is frequently exhausted, and espup aborts with
-        # "GitHub API returned status code: 403 Forbidden". espup reads the
-        # GITHUB_TOKEN environment variable and adds an Authorization header when
-        # it is set; the run-scoped token raises the budget to 5000 requests/hour,
-        # which is more than enough for this step's couple of API calls.
+      - name: Parse selected boards
+        # Splits the comma-separated input into a JSON array for the matrix.
+        id: parse
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOARDS_INPUT: "${{ inputs.boards }}"
         run: |
           set -euo pipefail
-          # ESP toolchain (xtensa-esp32s3) used by the esp32-s3-box-3 firmware.
-          # Install espup from its prebuilt binary — `cargo install espup`
-          # recompiles it from source on every run, which is slow and pointless.
-          curl -fsSL -o espup \
-            "https://github.com/esp-rs/espup/releases/download/v0.18.0/espup-x86_64-unknown-linux-gnu"
-          chmod +x espup
-          ./espup install --toolchain-version 1.90.0.0
-          source ~/export-esp.sh
-          # Stable toolchain for cargo and the xtask pack step below.
+          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
+          json="["
+          first=1
+          for b in "${parts[@]}"; do
+            b="${b//[[:space:]]/}"
+            [ -z "$b" ] && continue
+            if [ "$first" -eq 1 ]; then json+="$b"; first=0; else json+=", $b"; fi
+          done
+          json+="]"
+          if [ "$first" -eq 1 ]; then
+            echo "::error::no boards selected (boards input was empty)" >&2
+            exit 1
+          fi
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          echo "selected boards: ${json}"
+
+      - name: Install toolchains for selected boards
+        # Installs exactly what the selected boards need:
+        #   * stable Rust        — always (riscv boards, and the xtask)
+        #   * declared riscv tgt's — for every stable-channel board
+        #   * xtensa (+esp)      — only if any esp-channel board is selected
+        #
+        # Everything is installed into the default RUSTUP_HOME so that rustup's
+        # auto-detection (via each board's rust-toolchain.toml) resolves the
+        # right toolchain during the matrix build. We deliberately do NOT source
+        # ~/export-esp.sh here: it can point CARGO_HOME/RUSTUP_HOME at the esp
+        # toolchain, which would redirect the stable/riscv builds away from the
+        # default home. The build step relies on rustup auto-detection only,
+        # exactly as the original single-board workflow did.
+        env:
+          BOARDS_INPUT: "${{ inputs.boards }}"
+        run: |
+          set -euo pipefail
+
+          # Split the comma-separated board list, trimming whitespace.
+          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
+          BOARDS=()
+          for b in "${parts[@]}"; do
+            b="${b//[[:space:]]/}"
+            [ -n "$b" ] && BOARDS+=("$b")
+          done
+          if [ "${#BOARDS[@]}" -eq 0 ]; then
+            echo "::error::no boards selected (boards input was empty)" >&2
+            exit 1
+          fi
+          echo "Selected boards: ${BOARDS[*]}"
+
+          # Base: stable Rust (riscv boards + the xtask maintenance binary).
           rustup toolchain install stable --profile minimal
           rustup default stable
 
-      - name: Build esp32-s3-box-3 firmware
+          # Learn what else each board needs from its rust-toolchain.toml.
+          RISCV_TARGETS=()
+          INSTALL_XTENSA=0
+          for board in "${BOARDS[@]}"; do
+            tc="$board/rust-toolchain.toml"
+            if [ ! -f "$tc" ]; then
+              echo "::warning::'$board' has no rust-toolchain.toml; using stable default"
+              continue
+            fi
+            if grep -qE 'channel[[:space:]]*=[[:space:]]*"stable"' "$tc"; then
+              # stable board: collect the riscv targets it declares.
+              while IFS= read -r tgt; do
+                [ -n "$tgt" ] && RISCV_TARGETS+=("$tgt")
+              done < <(grep -oE '"[a-z0-9]*riscv[a-z0-9]*-unknown-none-elf"' "$tc" | tr -d '"')
+            elif grep -qE 'channel[[:space:]]*=[[:space:]]*"esp"' "$tc"; then
+              INSTALL_XTENSA=1
+            fi
+          done
+
+          # Add the riscv targets (dedup). A target that rustup cannot add
+          # (e.g. a custom triple) is a warning, not a failure — the board may
+          # ship its own target spec.
+          if [ "${#RISCV_TARGETS[@]}" -gt 0 ]; then
+            printf '%s\n' "${RISCV_TARGETS[@]}" | sort -u | while IFS= read -r t; do
+              if rustup target add "$t"; then
+                echo "riscv target ready: $t"
+              else
+                echo "::warning::could not add riscv target '$t' (board may need a custom target)" >&2
+              fi
+            done
+          fi
+
+          # Xtensa only if an esp-channel board is selected. espup registers the
+          # toolchain as "+esp", so `channel = "esp"` auto-resolves during build.
+          if [ "$INSTALL_XTENSA" -eq 1 ]; then
+            echo "Installing xtensa (esp) toolchain..."
+            curl -fsSL -o espup \
+              "https://github.com/esp-rs/espup/releases/download/v0.18.0/espup-x86_64-unknown-linux-gnu"
+            chmod +x espup
+            ./espup install --toolchain-version 1.90.0.0
+          else
+            echo "No esp-channel board selected; skipping xtensa install."
+          fi
+
+          rustup show
+
+      - name: Build xtask maintenance binary
+        # Pre-build once so the per-board pack steps below reuse it instead of
+        # racing to build it in parallel.
         run: |
           set -euo pipefail
-          cd esp32-s3-box-3
+          cargo build --release --manifest-path xtask/Cargo.toml
+
+      - name: Build + pack ${{ matrix.board }}
+        run: |
+          set -euo pipefail
+          board="${{ matrix.board }}"
+          echo ">>> Building $board"
+          cd "$board"
+          # rustup auto-selects the toolchain from $board/rust-toolchain.toml
+          # (esp for xtensa boards, stable for riscv boards).
           cargo build --release
+          cd ..
+          echo ">>> Packing espbrew artifact for $board"
+          cargo xtask pack --project "$board" --verbose
+          echo "pack dir:"
+          ls -la "pack-$board"
 
-      # Build the xtask "pack" artifact: a minimal, espbrew-ready project
-      # containing exactly Cargo.toml + .cargo/config.toml +
-      # target/xtensa-esp32s3-none-elf/release/<elf>. This is what espbrew's
-      # autodetect keys on, and it is a few MB instead of the full 180+ MB
-      # target tree. Runs on the stable host toolchain (no xtensa needed).
-      - name: Package espbrew artifact (cargo xtask pack)
-        run: cargo xtask pack --project esp32-s3-box-3 --verbose
-
-      - name: Upload esp32-s3-box-3 firmware
+      - name: Upload pack-${{ matrix.board }}
         # Minimal espbrew-ready project (Cargo.toml, .cargo/config.toml and
         # target/<triple>/release ELF) so espbrew auto-discovers it on the runner.
         #
         # IMPORTANT: include-hidden-files MUST be true. espbrew's autodetect
-        # keys on the dot-directory .cargo/config.toml, and upload-artifact@v4
-        # drops dot-files/dirs by default (include-hidden-files defaults to
-        # false). Without it the artifact has Cargo.toml + ELF but no .cargo/,
-        # so espbrew logs "no supported project detected".
+        # keys on the dot-directory .cargo/config.toml, and upload-artifact
+        # drops dot-files/dirs by default. Without it the artifact has
+        # Cargo.toml + ELF but no .cargo/, so espbrew logs "no supported project
+        # detected".
+        if: hashFiles("pack-${{ matrix.board }}/**") != ''
         uses: actions/upload-artifact@v7
         with:
-          name: esp32-s3-box-3-firmware
-          path: pack-esp32-s3-box-3/
+          name: pack-${{ matrix.board }}
+          path: pack-${{ matrix.board }}/
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # Build the browser (wasm) build in PARALLEL with the firmware above. It needs
-  # only the stable toolchain + wasm32 target (no xtensa), so it runs on a plain
-  # ubuntu runner alongside the [espbrew] flash job. The WASM build is NEVER sent
-  # to espbrew — it is published to GitHub Pages in the `deploy` job only.
+  # Build the browser (wasm) build in PARALLEL with the board builds above. It
+  # needs only the stable toolchain + wasm32 target (no xtensa), so it runs on a
+  # plain ubuntu runner alongside `build`. The WASM build is NEVER sent to
+  # espbrew — it is published to GitHub Pages in the `deploy` job only.
   # ---------------------------------------------------------------------------
   wasm:
     name: Build WASM browser build
-    # Pinned to ubuntu-26.04 ahead of the ubuntu-latest migration (2026-10-19).
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
@@ -156,11 +252,6 @@ jobs:
         # committed, so we read the resolved version at build time and fetch the
         # matching prebuilt CLI instead of `cargo install` (which rebuilds from
         # source each run).
-        #
-        # NOTE: the musl release tarball ships the CLI as ./wasm-bindgen (the
-        # old ./wasm-bindgen-cli name was dropped), sitting at the TOP LEVEL of
-        # the extracted dir. We locate it and copy it, then put the repo root on
-        # PATH so the packaging step can call it after `cd wasm`.
         id: wb
         run: |
           set -euo pipefail
@@ -219,18 +310,21 @@ jobs:
           retention-days: 1
 
   # ---------------------------------------------------------------------------
-  # Flash + capture a hardware snapshot on the self-hosted ESPBrew runner.
+  # Flash + capture a hardware snapshot per selected board on the self-hosted
+  # ESPBrew runner.
   #
   # The runner is only a client to the cluster leader, so `espbrew snap`
-  # auto-detects the firmware from the downloaded project (target/<triple>/
-  # release ELF) and flashes it at the standard app offset. No manual flash
-  # plan is required.
+  # auto-detects the firmware from the downloaded pack-<board> and flashes it at
+  # the standard app offset. No manual flash plan is required.
   # ---------------------------------------------------------------------------
   snap:
     name: Flash & snap (espbrew)
     needs: build
     if: github.event.inputs.enable_snap == 'true'
     runs-on: [espbrew]
+    env:
+      ESPBREW_CLUSTER: ${{ secrets.ESPBREW_CLUSTER }}
+      SNAP_DURATION: "${{ github.event.inputs.snap_duration }}"
     steps:
       # --- Security: never run on untrusted PR / fork code -------------------
       - name: Refuse to run on PRs / forks
@@ -240,42 +334,122 @@ jobs:
           echo "::error::It must never execute on pull requests or fork contributions."
           exit 1
 
-      - name: Download firmware pack
-        uses: actions/download-artifact@v7
-        with:
-          name: esp32-s3-box-3-firmware
-          path: firmware
+      - name: Checkout repo
+        uses: actions/checkout@v7
 
-      - name: Flash + capture snapshot
+      - name: Parse selected boards
+        id: parse
         env:
-          BOARD: "${{ github.event.inputs.board }}"
-          SNAP_DURATION: "${{ github.event.inputs.snap_duration }}"
+          BOARDS_INPUT: "${{ inputs.boards }}"
         run: |
           set -euo pipefail
-          # Run espbrew from the pack dir so its autodetect finds the project
-          # (Cargo.toml, .cargo/config.toml, target/<triple>/release ELF).
-          cd firmware
-          # --filter-alias selects the board registered on the ESPBrew leader.
-          # --save-dir writes a FLAT layout into firmware/snap-out/ (no
-          # TIMESTAMP/ subdir). --zip ../snapshot.zip makes espbrew itself
-          # produce the archive (using its built-in archive/zip) at the repo
-          # root, so we no longer depend on the external `zip` command.
-          espbrew snap \
-            --filter-alias "${BOARD}" \
-            --save-dir snap-out \
-            --zip ../snapshot.zip \
-            --duration "${SNAP_DURATION}"
+          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
+          json="["
+          first=1
+          for b in "${parts[@]}"; do
+            b="${b//[[:space:]]/}"
+            [ -z "$b" ] && continue
+            if [ "$first" -eq 1 ]; then json+="$b"; first=0; else json+=", $b"; fi
+          done
+          json+="]"
+          echo "json=$json" >> "$GITHUB_OUTPUT"
 
-      - name: Upload snapshot
+      - name: Download espbrew (arch-aware)
+        run: |
+          set -euo pipefail
+          # The self-hosted runner may be x64 or arm; pick the matching espbrew
+          # release so we never land an amd64 binary on an arm64 host (that
+          # surfaces as an opaque "exec format error" mid-flash).
+          case "$(uname -m)" in
+            x86_64)  ESPBREW_ARCH="linux-amd64" ;;
+            aarch64) ESPBREW_ARCH="linux-arm64" ;;
+            *)       ESPBREW_ARCH="linux-amd64" ;;
+          esac
+          echo "Downloading espbrew-${ESPBREW_ARCH}"
+          curl -fsSL \
+            "https://github.com/georgik/espbrew-go/releases/download/v0.8.1/espbrew-${ESPBREW_ARCH}" \
+            -o espbrew
+          chmod +x ./espbrew
+          ./espbrew --version
+
+      - name: Flash + snap ${{ matrix.board }}
+        strategy:
+          fail-fast: false
+          matrix:
+            boards: ${{ fromJSON(steps.parse.outputs.json) }}
+        run: |
+          set -euo pipefail
+          board="${{ matrix.board }}"
+
+          # The espbrew alias is registered in boards.yaml; fall back to the
+          # project dir name when a board is not registered there yet.
+          alias="$(awk -v p="$board" '
+            /^  - alias:/ { a=$3 }
+            /^    project:/ { if ($2 == p) print a }
+          ' boards.yaml)"
+          [ -z "$alias" ] && alias="$board"
+
+          mkdir -p "pack-$board" snapshots collected ex-$board
+          echo ">>> Downloading pack for $board (alias: $alias)"
+          artifacts/download-artifact \
+            name="pack-$board" \
+            path="pack-$board"
+          if [ ! -f "pack-$board/Cargo.toml" ]; then
+            echo "::warning::$board pack artifact missing Cargo.toml; skipping flash"
+            exit 0
+          fi
+
+          echo ">>> Flashing + snapping $alias"
+          # Run from inside the pack dir so espbrew auto-detects the Rust project
+          # (Cargo.toml + .cargo/config.toml), locates the ELF, and has the
+          # cluster leader convert it to bootloader/partitions/app.
+          ( cd "pack-$board" \
+            && espbrew snap \
+                --filter-alias "$alias" \
+                --save-dir snap-out \
+                --zip "../snapshots/$board.zip" \
+                --duration "$SNAP_DURATION" )
+
+          # Extract the captured frame and name it after the board so the gallery
+          # can match screenshots to boards. The zip above landed at repo-root
+          # snapshots/$board.zip (the --zip path was relative to pack-$board/).
+          unzip -oq "snapshots/$board.zip" -d "ex-$board"
+          img="$(find "ex-$board" -type f \( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' \) 2>/dev/null | head -1 || true)"
+          if [ -n "$img" ]; then
+            ext="${img##*.}"
+            cp "$img" "collected/$board.$ext"
+            echo "$board -> collected/$board.$ext"
+          else
+            echo "::warning::$board snap produced no image"
+          fi
+
+      - name: Collect snapshots
+        # Runs after the matrix on the same runner, so it sees every board's
+        # snapshot zip and flattens the frames into a single screenshot set.
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots
+          for z in snapshots/*.zip; do
+            [ -e "$z" ] || continue
+            unzip -oq "$z" -d screenshots
+          done
+          echo "Collected screenshots:"
+          ls -la screenshots/ || true
+
+      - name: Upload gallery screenshots
+        if: hashFiles('screenshots/**') != ''
         uses: actions/upload-artifact@v7
         with:
-          name: snapshot
-          path: snapshot.zip
+          name: gallery-screenshots
+          path: screenshots/
           retention-days: 30
 
   # ---------------------------------------------------------------------------
-  # Assemble and publish the GitHub Pages site: the hardware screenshot gallery
-  # plus the WASM browser build (built in the parallel `wasm` job, never flashed).
+  # Assemble and publish the GitHub Pages site: a per-board screenshot gallery
+  # (only the boards that were actually snapshotted appear with an image; the
+  # rest get a placeholder) plus the WASM browser build (built in the parallel
+  # `wasm` job, never flashed).
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy gallery (Pages)
@@ -283,7 +457,6 @@ jobs:
     # Run when gallery publishing is requested and snap either succeeded or was
     # intentionally skipped (enable_snap=false).
     if: github.event.inputs.publish_gallery == 'true' && (needs.snap.result == 'success' || needs.snap.result == 'skipped')
-    # Pinned to ubuntu-26.04 ahead of the ubuntu-latest migration (2026-10-19).
     runs-on: ubuntu-26.04
     environment:
       name: github-pages
@@ -297,76 +470,77 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Download WASM build
-        # The wasm job (below) always uploads this; deploy needs it, so it is
-        # present. Downloading it makes `deploy/site/wasm/` available for Pages.
         uses: actions/download-artifact@v7
         with:
           name: wasm-build
           path: deploy/wasm
 
-      - name: Download snapshot (optional)
-        # Fails silently when snap was skipped (enable_snap=false).
+      - name: Download gallery screenshots
+        # Fails silently when nothing was snapshotted (enable_snap=false or the
+        # runner produced no frames).
         uses: actions/download-artifact@v7
         with:
-          name: snapshot
-          path: deploy/snapshot
+          name: gallery-screenshots
+          path: deploy/site/screenshots
         continue-on-error: true
 
-      - name: Extract snapshot
+      - name: Assemble gallery (per-board cards)
+        env:
+          BOARDS_INPUT: "${{ inputs.boards }}"
         run: |
           set -euo pipefail
-          mkdir -p deploy/screenshot
-          if [ -f deploy/snapshot/snapshot.zip ]; then
-            ( cd deploy/snapshot && unzip -o -q snapshot.zip -d ../screenshot )
-            echo "snapshot extracted"
-          else
-            echo "no snapshot available (enable_snap=false?)"
-          fi
+          # Create the screenshot dir up front so the per-board find below never
+          # runs against a missing path (which would abort under set -euo pipefail
+          # when nothing was snapshotted).
+          mkdir -p deploy/site deploy/site/screenshots
 
-      - name: Prepare site (wasm + base)
-        run: |
-          set -euo pipefail
-          mkdir -p deploy/site
-          # Publish the WASM browser build under ./wasm/ (kept live, never
-          # flashed). The wasm job uploads it as the `wasm-build` artifact, so
-          # this is present whenever deploy runs.
+          # Copy the WASM browser build into the site (kept live, never flashed).
           cp -r deploy/wasm/. deploy/site/wasm/
 
-      - name: Locate and stage screenshot
-        id: screenshot
-        run: |
-          set -euo pipefail
-          screenshot=$(find deploy/screenshot -type f \( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' \) 2>/dev/null | head -1)
-          if [ -n "${screenshot}" ]; then
-            rel=$(printf '%s' "${screenshot}" | sed 's#^deploy/screenshot/##')
-            # Stage the screenshot inside the site so it is served from Pages.
-            mkdir -p "deploy/site/$(dirname "${rel}")"
-            cp "${screenshot}" "deploy/site/${rel}"
-            echo "path=${rel}" >> "$GITHUB_OUTPUT"
-            echo "screenshot staged: ${rel}"
-          else
-            echo "path=" >> "$GITHUB_OUTPUT"
-            echo "no screenshot captured"
-          fi
+          # Parse the selected boards.
+          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
+          BOARDS=()
+          for b in "${parts[@]}"; do
+            b="${b//[[:space:]]/}"
+            [ -n "$b" ] && BOARDS+=("$b")
+          done
 
-      - name: Inject screenshot into gallery template
-        env:
-          SCREENSHOT_REL: "${{ steps.screenshot.outputs.path }}"
-        run: |
-          set -euo pipefail
-          # The static gallery lives in the repo (deploy/gallery/index.template.html)
-          # so this job stays short; only the captured screenshot path is injected.
-          if [ -n "${SCREENSHOT_REL}" ]; then
-            printf '%s' "<img src=\"${SCREENSHOT_REL}\" alt=\"esp32-s3-box-3 hardware snapshot\" class=\"screenshot\">" > deploy/site/.screenshot.html
-          else
-            printf '%s' '<div class="placeholder">No hardware snapshot captured yet.</div>' > deploy/site/.screenshot.html
+          # Build one .card per board: an <img> when a screenshot exists, else a
+          # placeholder. Only the screenshots that were captured are staged.
+          : > deploy/site/.cards.html
+          if [ "${#BOARDS[@]}" -eq 0 ]; then
+            {
+              echo "    <div class=\"card\">"
+              echo "        <h2>Hardware snapshot</h2>"
+              echo "        <div class=\"placeholder\">No hardware snapshot captured yet.</div>"
+              echo "    </div>"
+            } >> deploy/site/.cards.html
           fi
+          for board in "${BOARDS[@]}"; do
+            img="$(find deploy/site/screenshots -type f -iname "${board}.*" 2>/dev/null \
+                    | grep -E '\.(jpg|jpeg|png)$' | head -1 || true)"
+            {
+              echo "    <div class=\"card\">"
+              echo "        <h2>Hardware snapshot ($board)</h2>"
+              if [ -n "$img" ]; then
+                rel="screenshots/$(basename "$img")"
+                echo "        <img class=\"screenshot\" src=\"$rel\" alt=\"$board hardware snapshot\">"
+              else
+                echo "        <div class=\"placeholder\">No hardware snapshot captured</div>"
+              fi
+              echo "    </div>"
+            } >> deploy/site/.cards.html
+          done
+
+          # Inject the per-board cards into the template and write index.html.
           awk '
-            BEGIN { while ((getline line < "deploy/site/.screenshot.html") > 0) rep = rep line }
+            BEGIN {
+              while ((getline line < "deploy/site/.cards.html") > 0) rep = rep line "\n"
+            }
             { gsub("__SCREENSHOT_HTML__", rep); print }
           ' deploy/gallery/index.template.html > deploy/site/index.html
-          rm -f deploy/site/.screenshot.html
-          echo "gallery assembled from template (screenshot=${SCREENSHOT_REL:-none})"
+          rm -f deploy/site/.cards.html
+          echo "gallery assembled: ${#BOARDS[@]} board slot(s)"
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
