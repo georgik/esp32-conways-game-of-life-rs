@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install ESP toolchain
         run: |
@@ -101,7 +101,7 @@ jobs:
         # drops dot-files/dirs by default (include-hidden-files defaults to
         # false). Without it the artifact has Cargo.toml + ELF but no .cargo/,
         # so espbrew logs "no supported project detected".
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: esp32-s3-box-3-firmware
           path: pack-esp32-s3-box-3/
@@ -120,7 +120,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install stable toolchain + wasm32 target
         run: |
@@ -201,7 +201,7 @@ jobs:
           fi
 
       - name: Upload WASM build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wasm-build
           path: wasm/pkg/
@@ -230,7 +230,7 @@ jobs:
           exit 1
 
       - name: Download firmware pack
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: esp32-s3-box-3-firmware
           path: firmware
@@ -256,7 +256,7 @@ jobs:
             --duration "${SNAP_DURATION}"
 
       - name: Upload snapshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: snapshot
           path: snapshot.zip
@@ -283,19 +283,19 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download WASM build
         # The wasm job (below) always uploads this; deploy needs it, so it is
         # present. Downloading it makes `deploy/site/wasm/` available for Pages.
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: wasm-build
           path: deploy/wasm
 
       - name: Download snapshot (optional)
         # Fails silently when snap was skipped (enable_snap=false).
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: snapshot
           path: deploy/snapshot
@@ -358,13 +358,13 @@ jobs:
           echo "gallery assembled from template (screenshot=${SCREENSHOT_REL:-none})"
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: deploy/site
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
