@@ -64,6 +64,17 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install ESP toolchain
+        # espup resolves the Xtensa Rust toolchain by querying the GitHub API
+        # (api.github.com/repos/esp-rs/rust-build/releases/latest). Unauthenticated
+        # API calls are rate-limited to 60 requests/hour per egress IP, and
+        # GitHub-hosted runners share those IPs across many workflows — so the
+        # budget is frequently exhausted, and espup aborts with
+        # "GitHub API returned status code: 403 Forbidden". espup reads the
+        # GITHUB_TOKEN environment variable and adds an Authorization header when
+        # it is set; the run-scoped token raises the budget to 5000 requests/hour,
+        # which is more than enough for this step's couple of API calls.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # ESP toolchain (xtensa-esp32s3) used by the esp32-s3-box-3 firmware.
