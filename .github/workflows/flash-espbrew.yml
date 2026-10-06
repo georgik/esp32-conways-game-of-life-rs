@@ -226,7 +226,7 @@ jobs:
         # drops dot-files/dirs by default. Without it the artifact has
         # Cargo.toml + ELF but no .cargo/, so espbrew logs "no supported project
         # detected".
-        if: hashFiles("pack-${{ matrix.board }}/**") != ''
+        if: hashFiles('pack-${{ matrix.board }}/**') != ''
         uses: actions/upload-artifact@v7
         with:
           name: pack-${{ matrix.board }}
@@ -398,17 +398,19 @@ jobs:
           ' boards.yaml)"
           [ -z "$alias" ] && alias="$board"
 
-          mkdir -p snapshots collected ex-$board
+          mkdir -p snapshots
           echo ">>> Flashing + snapping $alias"
           if [ ! -f "pack-$board/Cargo.toml" ]; then
             echo "::warning::$board pack artifact missing Cargo.toml; skipping flash"
             exit 0
           fi
 
-          echo ">>> Flashing + snapping $alias"
           # Run from inside the pack dir so espbrew auto-detects the Rust project
           # (Cargo.toml + .cargo/config.toml), locates the ELF, and has the
-          # cluster leader convert it to bootloader/partitions/app.
+          # cluster leader convert it to bootloader/partitions/app. espbrew writes
+          # the captured frame into a per-board zip at snapshots/$board.zip (repo
+          # root) so it can be uploaded as an artifact for the gallery deploy job.
+          # The --zip path is relative to pack-$board/, hence the ../ above.
           ( cd "pack-$board" \
             && espbrew snap \
                 --filter-alias "$alias" \
@@ -416,30 +418,24 @@ jobs:
                 --zip "../snapshots/$board.zip" \
                 --duration "$SNAP_DURATION" )
 
-          # Extract the captured frame and name it after the board so the gallery
-          # can match screenshots to boards. The zip above landed at repo-root
-          # snapshots/$board.zip (the --zip path was relative to pack-$board/).
-          unzip -oq "snapshots/$board.zip" -d "ex-$board"
-          img="$(find "ex-$board" -type f \( -name '*.jpg' -o -name '*.jpeg' -o -name '*.png' \) 2>/dev/null | head -1 || true)"
-          if [ -n "$img" ]; then
-            ext="${img##*.}"
-            cp "$img" "collected/$board.$ext"
-            echo "$board -> collected/$board.$ext"
-          else
-            echo "::warning::$board snap produced no image"
-          fi
-
       - name: Collect snapshots
         # Runs after the matrix on the same runner, so it sees every board's
         # snapshot zip and flattens the frames into a single screenshot set.
+        # Uses Python's stdlib zipfile (always present on the runner) instead of
+        # `unzip`, which is not installed on ubuntu runners.
         if: always()
         run: |
           set -euo pipefail
-          mkdir -p screenshots
-          for z in snapshots/*.zip; do
-            [ -e "$z" ] || continue
-            unzip -oq "$z" -d screenshots
-          done
+          rm -rf screenshots && mkdir -p screenshots
+          python3 - <<'PY'
+          import glob, zipfile
+          zips = sorted(glob.glob("snapshots/*.zip"))
+          for z in zips:
+              with zipfile.ZipFile(z) as f:
+                  for info in f.infolist():
+                      f.extract(info, "screenshots")
+          print("Extracted from:", zips)
+          PY
           echo "Collected screenshots:"
           ls -la screenshots/ || true
 
