@@ -157,17 +157,26 @@ jobs:
             exit 1
           fi
           echo "version=${wb_version}" >> "$GITHUB_OUTPUT"
-          cd /tmp
+          # Extract the tarball into a dedicated, fully-accessible directory so the
+          # locate step below only ever scans our own files. Scanning /tmp with
+          # `find .` walks restricted dirs (systemd-private-*, snap-private-tmp)
+          # that return permission-denied, which makes `find` exit non-zero and
+          # trips `set -euo pipefail` — aborting before we even install the CLI.
+          extract_dir="/tmp/wasm-bindgen-${wb_version}"
+          mkdir -p "${extract_dir}"
           curl -fsSL -o wb.tar.gz \
             "https://github.com/rustwasm/wasm-bindgen/releases/download/${wb_version}/wasm-bindgen-${wb_version}-x86_64-unknown-linux-musl.tar.gz"
-          tar xzf wb.tar.gz
-          bin="$(find . -maxdepth 2 -name wasm-bindgen -type f | head -1)"
+          tar xzf wb.tar.gz -C "${extract_dir}"
+          # The musl tarball ships the binary at the top level of its extracted
+          # dir (depth 2 from the extraction root), so a maxdepth-2 find is enough.
+          bin="$(find "${extract_dir}" -maxdepth 2 -name wasm-bindgen -type f 2>/dev/null | head -1)"
           if [ -z "${bin}" ]; then
             echo "::error::could not locate the wasm-bindgen binary in the tarball" >&2
             exit 1
           fi
-          cp "${bin}" ./wasm-bindgen-cli && chmod +x ./wasm-bindgen-cli
-          ./wasm-bindgen-cli --version
+          # Install it at the repo root so it is on PATH for the packaging step.
+          cp "${bin}" "./wasm-bindgen-cli" && chmod +x "./wasm-bindgen-cli"
+          "./wasm-bindgen-cli" --version
           # Repo root (where we just installed wasm-bindgen-cli) on PATH.
           echo "$(pwd)" >> "$GITHUB_PATH"
 
