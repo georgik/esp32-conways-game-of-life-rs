@@ -62,23 +62,20 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Build + package the selected boards. One matrix entry per board; each entry
-  # builds and packs its own board. Toolchains are installed once, up-front,
-  # based on what the selected boards need (see the "Install toolchains" step).
+  # Parse the comma-separated `boards` input into a JSON array ONCE, then emit
+  # it as a job output. `build` and `snap` consume it via `needs.setup`.
+  #
+  # A matrix expression may only use the `github`, `inputs`, `needs`, `vars`
+  # contexts (never `steps`), so the parse cannot live inside a matrix step —
+  # it must run in a job that the matrix jobs `need`.
   # ---------------------------------------------------------------------------
-  build:
-    name: Build + package
+  setup:
+    name: Parse board selection
     runs-on: ubuntu-26.04
-    strategy:
-      fail-fast: false
-      matrix:
-        boards: ${{ fromJSON(steps.parse.outputs.json) }}
+    outputs:
+      boards: ${{ steps.parse.outputs.json }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
       - name: Parse selected boards
-        # Splits the comma-separated input into a JSON array for the matrix.
         id: parse
         env:
           BOARDS_INPUT: "${{ inputs.boards }}"
@@ -90,7 +87,7 @@ jobs:
           for b in "${parts[@]}"; do
             b="${b//[[:space:]]/}"
             [ -z "$b" ] && continue
-            if [ "$first" -eq 1 ]; then json+="$b"; first=0; else json+=", $b"; fi
+            if [ "$first" -eq 1 ]; then json+="\"$b\""; first=0; else json+=", \"$b\""; fi
           done
           json+="]"
           if [ "$first" -eq 1 ]; then
@@ -99,6 +96,23 @@ jobs:
           fi
           echo "json=$json" >> "$GITHUB_OUTPUT"
           echo "selected boards: ${json}"
+
+  # ---------------------------------------------------------------------------
+  # Build + package the selected boards. One matrix entry per board; each entry
+  # builds and packs its own board. Toolchains are installed once, up-front,
+  # based on what the selected boards need (see the "Install toolchains" step).
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build + package
+    needs: setup
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.setup.outputs.boards) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Install toolchains for selected boards
         # Installs exactly what the selected boards need:
@@ -323,7 +337,7 @@ jobs:
   # ---------------------------------------------------------------------------
   snap:
     name: Flash & snap (espbrew)
-    needs: build
+    needs: [ build, setup ]
     if: github.event.inputs.enable_snap == 'true'
     runs-on: [espbrew]
     env:
@@ -332,7 +346,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        boards: ${{ fromJSON(steps.parse.outputs.json) }}
+        board: ${{ fromJSON(needs.setup.outputs.boards) }}
     steps:
       # --- Security: never run on untrusted PR / fork code -------------------
       - name: Refuse to run on PRs / forks
@@ -344,23 +358,6 @@ jobs:
 
       - name: Checkout repo
         uses: actions/checkout@v7
-
-      - name: Parse selected boards
-        id: parse
-        env:
-          BOARDS_INPUT: "${{ inputs.boards }}"
-        run: |
-          set -euo pipefail
-          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
-          json="["
-          first=1
-          for b in "${parts[@]}"; do
-            b="${b//[[:space:]]/}"
-            [ -z "$b" ] && continue
-            if [ "$first" -eq 1 ]; then json+="$b"; first=0; else json+=", $b"; fi
-          done
-          json+="]"
-          echo "json=$json" >> "$GITHUB_OUTPUT"
 
       - name: Download espbrew (arch-aware)
         run: |
@@ -380,6 +377,15 @@ jobs:
           chmod +x ./espbrew
           ./espbrew --version
 
+      - name: Download firmware pack
+        # Downloads the per-board artifact uploaded by the `build` job. A matrix
+        # expression cannot use the `steps` context, so the download must be a
+        # real `uses:` step (not a CLI invocation inside the flash run block).
+        uses: actions/download-artifact@v7
+        with:
+          name: pack-${{ matrix.board }}
+          path: pack-${{ matrix.board }}/
+
       - name: Flash + snap ${{ matrix.board }}
         run: |
           set -euo pipefail
@@ -393,11 +399,8 @@ jobs:
           ' boards.yaml)"
           [ -z "$alias" ] && alias="$board"
 
-          mkdir -p "pack-$board" snapshots collected ex-$board
-          echo ">>> Downloading pack for $board (alias: $alias)"
-          artifacts/download-artifact \
-            name="pack-$board" \
-            path="pack-$board"
+          mkdir -p snapshots collected ex-$board
+          echo ">>> Flashing + snapping $alias"
           if [ ! -f "pack-$board/Cargo.toml" ]; then
             echo "::warning::$board pack artifact missing Cargo.toml; skipping flash"
             exit 0
