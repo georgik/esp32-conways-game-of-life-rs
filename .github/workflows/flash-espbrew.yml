@@ -421,21 +421,22 @@ jobs:
       - name: Collect snapshots
         # Runs after the matrix on the same runner, so it sees every board's
         # snapshot zip and flattens the frames into a single screenshot set.
-        # Uses Python's stdlib zipfile (always present on the runner) instead of
-        # `unzip`, which is not installed on ubuntu runners.
+        #
+        # ubuntu-26.04 runners do not put `unzip` or `python3` on PATH by
+        # default: Python ships as a package but must be added via
+        # setup-python, and `unzip` is installed but not on PATH. Install
+        # unzip via apt so extraction is deterministic, then flatten every
+        # board's frames (-j) into the single screenshots/ directory.
         if: always()
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip
           rm -rf screenshots && mkdir -p screenshots
-          python3 - <<'PY'
-          import glob, zipfile
-          zips = sorted(glob.glob("snapshots/*.zip"))
-          for z in zips:
-              with zipfile.ZipFile(z) as f:
-                  for info in f.infolist():
-                      f.extract(info, "screenshots")
-          print("Extracted from:", zips)
-          PY
+          shopt -s nullglob
+          for z in snapshots/*.zip; do
+            unzip -o -j "$z" -d screenshots
+          done
           echo "Collected screenshots:"
           ls -la screenshots/ || true
 
