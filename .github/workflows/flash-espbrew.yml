@@ -341,7 +341,6 @@ jobs:
     if: github.event.inputs.enable_snap == 'true'
     runs-on: [espbrew]
     env:
-      ESPBREW_CLUSTER: ${{ secrets.ESPBREW_CLUSTER }}
       SNAP_DURATION: "${{ github.event.inputs.snap_duration }}"
     strategy:
       fail-fast: false
