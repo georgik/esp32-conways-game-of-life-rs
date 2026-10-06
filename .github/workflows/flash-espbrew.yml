@@ -69,6 +69,10 @@ jobs:
   build:
     name: Build + package
     runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        boards: ${{ fromJSON(steps.parse.outputs.json) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -325,6 +329,10 @@ jobs:
     env:
       ESPBREW_CLUSTER: ${{ secrets.ESPBREW_CLUSTER }}
       SNAP_DURATION: "${{ github.event.inputs.snap_duration }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        boards: ${{ fromJSON(steps.parse.outputs.json) }}
     steps:
       # --- Security: never run on untrusted PR / fork code -------------------
       - name: Refuse to run on PRs / forks
@@ -373,10 +381,6 @@ jobs:
           ./espbrew --version
 
       - name: Flash + snap ${{ matrix.board }}
-        strategy:
-          fail-fast: false
-          matrix:
-            boards: ${{ fromJSON(steps.parse.outputs.json) }}
         run: |
           set -euo pipefail
           board="${{ matrix.board }}"
