@@ -80,13 +80,22 @@ jobs:
         # The wasm build is currently disabled (see the commented-out "Build
         # WASM" step), so this is only needed once WASM is re-enabled — but it
         # is cheap to fetch and keeps the step correct for then.
+        #
+        # NOTE: the musl release tarball ships the CLI as ./wasm-bindgen (the
+        # old ./wasm-bindgen-cli name was dropped), sitting at the TOP LEVEL of
+        # the extracted dir. We locate it and copy it to the conventional
+        # ./wasm-bindgen-cli name so downstream steps can rely on it.
         run: |
           set -euo pipefail
           curl -fsSL -o wb.tar.gz \
             "https://github.com/rustwasm/wasm-bindgen/releases/download/0.2.100/wasm-bindgen-0.2.100-x86_64-unknown-linux-musl.tar.gz"
           tar xzf wb.tar.gz
-          bin=$(find . -maxdepth 2 -name wasm-bindgen-cli -type f | head -1)
-          cp "$bin" ./wasm-bindgen-cli && chmod +x ./wasm-bindgen-cli
+          bin="$(find . -maxdepth 2 -name wasm-bindgen -type f | head -1)"
+          if [ -z "${bin}" ]; then
+            echo "::error::could not locate the wasm-bindgen binary in the tarball" >&2
+            exit 1
+          fi
+          cp "${bin}" ./wasm-bindgen-cli && chmod +x ./wasm-bindgen-cli
           ./wasm-bindgen-cli --version
 
       - name: Build esp32-s3-box-3 firmware
