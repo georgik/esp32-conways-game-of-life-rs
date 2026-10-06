@@ -203,6 +203,7 @@ jobs:
           cargo build --release --manifest-path xtask/Cargo.toml
 
       - name: Build + pack ${{ matrix.board }}
+        id: buildpack
         run: |
           set -euo pipefail
           board="${{ matrix.board }}"
@@ -214,8 +215,19 @@ jobs:
           cd ..
           echo ">>> Packing espbrew artifact for $board"
           cargo xtask pack --project "$board" --verbose
-          echo "pack dir:"
-          ls -la "pack-$board"
+          # Expose whether the pack dir was produced so the upload step below
+          # can guard on it. Done as a step OUTPUT rather than a hashFiles()
+          # condition wrapping the matrix board token, so the condition stays
+          # free of the "literal text outside replacement tokens" warning that
+          # GitHub emits whenever expression text wraps a replacement token.
+          if [ -d "pack-$board" ]; then
+            echo "pack_exists=true" >> "$GITHUB_OUTPUT"
+            echo "pack dir:"
+            ls -la "pack-$board"
+          else
+            echo "pack_exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::pack-$board directory not produced; skipping upload"
+          fi
 
       - name: Upload pack-${{ matrix.board }}
         # Minimal espbrew-ready project (Cargo.toml, .cargo/config.toml and
@@ -226,7 +238,7 @@ jobs:
         # drops dot-files/dirs by default. Without it the artifact has
         # Cargo.toml + ELF but no .cargo/, so espbrew logs "no supported project
         # detected".
-        if: hashFiles('pack-${{ matrix.board }}/**') != ''
+        if: steps.buildpack.outputs.pack_exists == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: pack-${{ matrix.board }}
@@ -470,82 +482,51 @@ jobs:
           path: deploy/site/zips
         continue-on-error: true
 
-      - name: Extract snapshot zips
-        # Expand every board's snapshot zip into the screenshots dir. This runs
-        # on the GitHub-hosted ubuntu runner, which is where all file
-        # manipulation now lives (not on the espbrew hardware runner). unzip is
-        # not on PATH by default on ubuntu-26.04, so install it via apt.
-        # (-j flattens every board's frames into the single screenshots/ dir,
-        # matching the previous behavior the gallery assembly relied on.)
+      - name: Assemble gallery
+        # The template renders ONE hardware-snapshot card whose <h2> names the
+        # board and exposes __SCREENSHOT_HTML__ for the frame only. We inject
+        # just that inner content (an <img> or a placeholder) — never a whole
+        # card — so we do not nest a duplicate card inside the template's card.
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y unzip
-          mkdir -p deploy/site/screenshots
           shopt -s nullglob
-          for z in deploy/site/zips/*.zip; do
-            unzip -o -j "$z" -d deploy/site/screenshots
-          done
-          echo "Extracted snapshot frames:"
-          ls -la deploy/site/screenshots/ || true
-
-      - name: Assemble gallery (per-board cards)
-        env:
-          BOARDS_INPUT: "${{ inputs.boards }}"
-        run: |
-          set -euo pipefail
-          # Create the screenshot dir up front so the per-board find below never
-          # runs against a missing path (which would abort under set -euo pipefail
-          # when nothing was snapshotted).
           mkdir -p deploy/site deploy/site/screenshots
 
           # Copy the WASM browser build into the site (kept live, never flashed).
           cp -r deploy/wasm/. deploy/site/wasm/
 
-          # Parse the selected boards.
-          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
-          BOARDS=()
-          for b in "${parts[@]}"; do
-            b="${b//[[:space:]]/}"
-            [ -n "$b" ] && BOARDS+=("$b")
+          # Each board's snapshot zip is unpacked into its own subdir so frames
+          # from different boards never mix. -j flattens each zip's frames.
+          for z in deploy/site/zips/*.zip; do
+            b="$(basename "$z" .zip)"
+            mkdir -p "deploy/site/screenshots/$b"
+            unzip -o -j "$z" -d "deploy/site/screenshots/$b"
           done
 
-          # Build one .card per board: an <img> when a screenshot exists, else a
-          # placeholder. Only the screenshots that were captured are staged.
-          : > deploy/site/.cards.html
-          if [ "${#BOARDS[@]}" -eq 0 ]; then
-            {
-              echo "    <div class=\"card\">"
-              echo "        <h2>Hardware snapshot</h2>"
-              echo "        <div class=\"placeholder\">No hardware snapshot captured yet.</div>"
-              echo "    </div>"
-            } >> deploy/site/.cards.html
+          # The board is the one the template's <h2> names. Match its first image
+          # regardless of the frame's filename, so a differently-named capture is
+          # no longer mistaken for "no snapshot".
+          board="esp32-s3-box-3"
+          img="$(find "deploy/site/screenshots/$board" -type f \
+                    \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) \
+                    2>/dev/null | head -1 || true)"
+          : > deploy/site/.content.html
+          if [ -n "$img" ]; then
+            rel="screenshots/$board/$(basename "$img")"
+            echo "        <img class=\"screenshot\" src=\"$rel\" alt=\"$board hardware snapshot\">" >> deploy/site/.content.html
+          else
+            echo "        <div class=\"placeholder\">No hardware snapshot captured</div>" >> deploy/site/.content.html
           fi
-          for board in "${BOARDS[@]}"; do
-            img="$(find deploy/site/screenshots -type f -iname "${board}.*" 2>/dev/null \
-                    | grep -E '\.(jpg|jpeg|png)$' | head -1 || true)"
-            {
-              echo "    <div class=\"card\">"
-              echo "        <h2>Hardware snapshot ($board)</h2>"
-              if [ -n "$img" ]; then
-                rel="screenshots/$(basename "$img")"
-                echo "        <img class=\"screenshot\" src=\"$rel\" alt=\"$board hardware snapshot\">"
-              else
-                echo "        <div class=\"placeholder\">No hardware snapshot captured</div>"
-              fi
-              echo "    </div>"
-            } >> deploy/site/.cards.html
-          done
 
-          # Inject the per-board cards into the template and write index.html.
+          # Inject the frame into the template and write index.html.
           awk '
             BEGIN {
-              while ((getline line < "deploy/site/.cards.html") > 0) rep = rep line "\n"
+              while ((getline line < "deploy/site/.content.html") > 0) rep = rep line "\n"
             }
             { gsub("__SCREENSHOT_HTML__", rep); print }
           ' deploy/gallery/index.template.html > deploy/site/index.html
-          rm -f deploy/site/.cards.html
-          echo "gallery assembled: ${#BOARDS[@]} board slot(s)"
+          rm -f deploy/site/.content.html
+          echo "gallery assembled for $board"
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
