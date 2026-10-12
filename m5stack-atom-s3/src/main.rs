@@ -347,6 +347,23 @@ fn render_system(
         .display
         .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
         .unwrap();
+
+    // Dump the framebuffer over the esp-println console once, right after
+    // the first rendered frame. A full frame takes a while at 115200 baud,
+    // so this intentionally fires only once per boot.
+    #[cfg(feature = "screenshot")]
+    if game.generation == 1 {
+        let pixel_bytes: alloc::vec::Vec<u8> =
+            embedded_screenshot::rgb565_le_bytes(fb_res.frame_buf.data.as_ref()).collect();
+        embedded_screenshot::write_framebuffer(
+            &mut embedded_screenshot::ConsolePrinter,
+            LCD_H_RES,
+            LCD_V_RES,
+            embedded_screenshot::RGBL,
+            &pixel_bytes,
+        )
+        .ok();
+    }
 }
 
 #[main]
