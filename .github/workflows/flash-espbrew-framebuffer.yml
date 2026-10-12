@@ -201,11 +201,11 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: xtask-bin
-          path: .
+          path: xtask-bin/
 
       - name: Restore xtask execute permission
         # The artifact zip does not preserve the executable bit.
-        run: chmod +x xtask
+        run: chmod +x xtask-bin/xtask
 
       - name: Build + pack ${{ matrix.board }} (screenshot feature)
         id: buildpack
@@ -217,7 +217,7 @@ jobs:
           cargo build --release --features screenshot
           cd ..
           echo ">>> Packing espbrew artifact for $board"
-          ./xtask pack --project "$board" --verbose
+          ./xtask-bin/xtask pack --project "$board" --verbose
           if [ -d "pack-$board" ]; then
             echo "pack_exists=true" >> "$GITHUB_OUTPUT"
             echo "pack dir:"
@@ -427,11 +427,11 @@ jobs:
         uses: actions/download-artifact@v7
         with:
           name: xtask-bin
-          path: .
+          path: xtask-bin/
 
       - name: Restore xtask execute permission
         # The artifact zip does not preserve the executable bit.
-        run: chmod +x xtask
+        run: chmod +x xtask-bin/xtask
 
       - name: Download WASM build
         uses: actions/download-artifact@v7
@@ -458,7 +458,7 @@ jobs:
         # a placeholder card.
         run: |
           set -euo pipefail
-          ./xtask gallery \
+          ./xtask-bin/xtask gallery \
             --zips-dir deploy/site/zips \
             --wasm-dir deploy/wasm \
             --template deploy/gallery/index.template.html \
