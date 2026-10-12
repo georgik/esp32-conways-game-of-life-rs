@@ -85,27 +85,27 @@ cargo run --release
 
 ### Waveshare ESP32-S3-Touch-LCD 1.28
 
-![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch LCD with Bevy ECS](docs/waveshare-esp32s3-touch-lcd-1_28.jpg)
+![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch LCD with Bevy ECS](docs/waveshare-esp32-s3-touch-lcd-1_28.jpg)
 
 [Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waheshare ESP32-S3 LCD Touch 1.28 inch](https://www.waveshare.com/esp32-c6-lcd-1_47.htm) with DMA and framebuffer:
 
 The implementation is based on Rust no_std and Bevy ECS no_std, plus mipidsi crate.
 
 ```
-cd waveshare-esp32s3-touch-lcd-1_28
+cd waveshare-esp32-s3-touch-lcd-1_28
 cargo run --release
 ```
 
 ### Waveshare ESP32-S3-Touch-AMOLED 1.8
 
-![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch AMOLED with Bevy ECS](docs/waveshare-esp32s3-touch-amoled-1_8.jpg)
+![ESP32 Conways Game of Life in Rust - Waveshare ESP32-S3 Touch AMOLED with Bevy ECS](docs/waveshare-esp32-s3-touch-amoled-1_8.jpg)
 
 [Rust Bare Metal no_std](https://developer.espressif.com/blog/2025/02/rust-esp-hal-beta/) with [Bevy ECS no_std](https://github.com/bevyengine/bevy/issues/15460) on [Waveshare ESP32-S3 Touch AMOLED 1.8 inch](https://www.waveshare.com/esp32s3-touch-amoled-1_8.htm) with DMA and framebuffer:
 
 The implementation is based on Rust no_std and Bevy ECS no_std, featuring a high-density 368x448 pixel AMOLED display with enhanced font visibility. Updated to use sh8601-rs driver from GitHub (feature/esp-hal-1.1.0 branch).
 
 ```
-cd waveshare-esp32s3-touch-amoled-1_8
+cd waveshare-esp32-s3-touch-amoled-1_8
 cargo run --release
 ```
 
