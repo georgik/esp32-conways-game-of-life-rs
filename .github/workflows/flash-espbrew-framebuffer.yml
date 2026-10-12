@@ -36,6 +36,10 @@ on:
         description: 'Deploy framebuffer gallery + WASM browser build to GitHub Pages'
         type: boolean
         default: true
+      espbrew_version:
+        description: 'espbrew release tag to download (needs framebuffer extraction + skip_capture, i.e. >= v0.11.1)'
+        type: string
+        default: 'v0.11.1'
 
 # Self-hosted runners still need read access to the repository contents.
 permissions:
@@ -288,19 +292,22 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v7
 
-      - name: Download espbrew >= v0.11.0 (arch-aware)
+      - name: Download espbrew (arch-aware)
+        env:
+          ESPBREW_VERSION: "${{ inputs.espbrew_version }}"
         run: |
           set -euo pipefail
-          # Framebuffer extraction needs the v0.11.0 espbrew release or newer
-          # (it ships the esp_lcd_screenshot watcher + PNG extraction).
+          # Framebuffer extraction needs espbrew >= v0.11.0 (esp_lcd_screenshot
+          # watcher + PNG extraction); --no-capture as a server-side camera
+          # skip needs >= v0.11.1.
           case "$(uname -m)" in
             x86_64)  ESPBREW_ARCH="linux-amd64" ;;
             aarch64) ESPBREW_ARCH="linux-arm64" ;;
             *)       ESPBREW_ARCH="linux-amd64" ;;
           esac
-          echo "Downloading espbrew-${ESPBREW_ARCH}"
+          echo "Downloading espbrew-${ESPBREW_VERSION}-${ESPBREW_ARCH}"
           curl -fsSL \
-            "https://github.com/georgik/espbrew-go/releases/download/v0.11.0/espbrew-${ESPBREW_ARCH}" \
+            "https://github.com/georgik/espbrew-go/releases/download/${ESPBREW_VERSION}/espbrew-${ESPBREW_ARCH}" \
             -o espbrew
           chmod +x ./espbrew
           ./espbrew --version
@@ -332,11 +339,13 @@ jobs:
           fi
 
           # Run from inside the pack dir so espbrew auto-detects the Rust
-          # project. The snap zip contains the camera frame (if any) and the
-          # framebuffer PNG extracted from the serial log.
+          # project. --no-capture tells the server to skip the camera; the
+          # snap zip then contains only the framebuffer PNG extracted from
+          # the serial log.
           ( cd "pack-$board" \
             && espbrew snap \
                 --filter-alias "$alias" \
+                --no-capture \
                 --save-dir snap-out \
                 --zip "../snapshots/$board.zip" \
                 --duration "$SNAP_DURATION" )
