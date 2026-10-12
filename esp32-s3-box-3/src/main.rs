@@ -315,6 +315,36 @@ fn render_system(
         .display
         .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
         .unwrap();
+
+    // Dump the framebuffer over serial once, right after the first
+    // rendered frame. A full 320x240 RGB565 frame takes a while at
+    // 115200 baud, so this intentionally fires only once per boot.
+    #[cfg(feature = "screenshot")]
+    if game.generation == 1 {
+        let pixel_bytes: alloc::vec::Vec<u8> =
+            esp_screenshot::rgb565_le_bytes(fb_res.frame_buf.data.as_ref()).collect();
+        let mut serial_writer = SerialWriter;
+        esp_screenshot::write_framebuffer(
+            &mut serial_writer,
+            LCD_H_RES,
+            LCD_V_RES,
+            esp_screenshot::RGBL,
+            &pixel_bytes,
+        )
+        .ok();
+    }
+}
+
+/// Serial sink for the screenshot dump.
+#[cfg(feature = "screenshot")]
+struct SerialWriter;
+
+#[cfg(feature = "screenshot")]
+impl core::fmt::Write for SerialWriter {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        esp_println::print!("{s}");
+        Ok(())
+    }
 }
 
 #[main]

@@ -29,7 +29,11 @@ embedded-hal-bus = "0.3.0"
 #bevy_ecs = { git = "https://github.com/bevyengine/bevy.git", rev = "301f618", default-features = false }
 bevy_ecs = { version = "0.18.1", default-features = false }
 esp-bootloader-esp-idf = { version = "0.5.0", features = ["esp32s3"] }
+esp-screenshot = { git = "https://github.com/georgik/esp-screenshot-rs", rev = "87ea89398af5df64c1b8110603dbdf0c0b1e2852", optional = true, default-features = false, features = ["embedded-graphics"] }
 
 [features]
 default = [ "esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3" ]
+# Dump the framebuffer over the serial console as base64
+# (esp_lcd_screenshot compatible protocol).
+screenshot = ["dep:esp-screenshot"]
 
