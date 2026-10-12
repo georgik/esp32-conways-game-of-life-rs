@@ -426,6 +426,17 @@ fn main() -> ! {
 
     info!("Display initialized");
 
+    // The screenshot dump fires a few frames after boot, but CI monitors
+    // attach late — if the dump starts before the monitor listens, its
+    // FRAMEBUFFER_BEGIN header is lost and the payload is not extracted.
+    // Wait here so the host catches the log from the beginning.
+    #[cfg(feature = "screenshot")]
+    {
+        info!("Screenshot feature: waiting 5s for the serial monitor to attach");
+        let mut wait = Delay::new();
+        wait.delay_ms(5000u32);
+    }
+
     // --- Initialize Game Resources ---
     let mut game = GameOfLifeResource::default();
     let mut rng_instance = Rng::new();
