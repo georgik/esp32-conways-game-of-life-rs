@@ -25,9 +25,9 @@ on:
   workflow_dispatch:
     inputs:
       boards:
-        description: 'Comma-separated project dirs to build/flash (must support the screenshot feature; esp32-p4-function-ev-board also builds with screenshot but is omitted until espbrew detects the riscv32imafc triple)'
+        description: 'Comma-separated project dirs to build/flash (must support the screenshot feature; esp32-p4-function-ev-board also builds with screenshot but is omitted until espbrew detects the riscv32imafc triple; waveshare-esp32-s3-touch-lcd-1_28, m5stack-core2 and esp32-s3-lcd-ev-board are temporarily disabled - under investigation)'
         type: string
-        default: 'esp32-s3-box-3, m5stack-atom-s3, m5stack-atom-s3r, waveshare-esp32-s3-touch-lcd-1_28, m5stack-core2, esp32-s3-lcd-ev-board'
+        default: 'esp32-s3-box-3, m5stack-atom-s3, m5stack-atom-s3r'
       snap_duration:
         description: 'Snap capture duration (seconds; ~20s needed per 320x240 frame at 115200 baud)'
         type: string
@@ -84,13 +84,44 @@ jobs:
           echo "selected boards: ${json}"
 
   # ---------------------------------------------------------------------------
+  # Build the xtask maintenance binary ONCE and share it as an artifact. The
+  # build matrix uses it for `pack`, the deploy job for `gallery` — both are
+  # pure file operations, so the prebuilt Linux binary is reused instead of
+  # recompiling xtask in every job.
+  # ---------------------------------------------------------------------------
+  xtask:
+    name: Build xtask
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install stable toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build xtask
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path xtask/Cargo.toml
+
+      - name: Upload xtask binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: xtask-bin
+          path: target/release/xtask
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
   # Build + package the selected boards with the screenshot feature enabled.
   # Toolchain handling is identical to flash-espbrew.yml: rustup auto-detects
   # each board's toolchain from its rust-toolchain.toml.
   # ---------------------------------------------------------------------------
   build:
     name: Build + package (screenshot)
-    needs: setup
+    needs: [setup, xtask]
     runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
@@ -166,10 +197,15 @@ jobs:
 
           rustup show
 
-      - name: Build xtask maintenance binary
-        run: |
-          set -euo pipefail
-          cargo build --release --manifest-path xtask/Cargo.toml
+      - name: Download prebuilt xtask
+        uses: actions/download-artifact@v7
+        with:
+          name: xtask-bin
+          path: .
+
+      - name: Restore xtask execute permission
+        # The artifact zip does not preserve the executable bit.
+        run: chmod +x xtask
 
       - name: Build + pack ${{ matrix.board }} (screenshot feature)
         id: buildpack
@@ -181,7 +217,7 @@ jobs:
           cargo build --release --features screenshot
           cd ..
           echo ">>> Packing espbrew artifact for $board"
-          cargo xtask pack --project "$board" --verbose
+          ./xtask pack --project "$board" --verbose
           if [ -d "pack-$board" ]; then
             echo "pack_exists=true" >> "$GITHUB_OUTPUT"
             echo "pack dir:"
@@ -370,8 +406,11 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy gallery (Pages)
-    needs: [build, wasm, snap, setup]
-    if: github.event.inputs.publish_gallery == 'true' && (needs.snap.result == 'success' || needs.snap.result == 'skipped')
+    needs: [build, wasm, snap, setup, xtask]
+    # Publish even when some flash/snap jobs failed: the gallery generator
+    # renders placeholder cards for boards without a snapshot, so a partial
+    # run still produces a correct site.
+    if: ${{ !cancelled() && github.event.inputs.publish_gallery == 'true' }}
     runs-on: ubuntu-26.04
     environment:
       name: github-pages
@@ -384,16 +423,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install stable toolchain
-        run: |
-          set -euo pipefail
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+      - name: Download prebuilt xtask
+        uses: actions/download-artifact@v7
+        with:
+          name: xtask-bin
+          path: .
 
-      - name: Build xtask (gallery generator)
-        run: |
-          set -euo pipefail
-          cargo build --release --manifest-path xtask/Cargo.toml
+      - name: Restore xtask execute permission
+        # The artifact zip does not preserve the executable bit.
+        run: chmod +x xtask
 
       - name: Download WASM build
         uses: actions/download-artifact@v7
@@ -420,7 +458,7 @@ jobs:
         # a placeholder card.
         run: |
           set -euo pipefail
-          cargo xtask gallery \
+          ./xtask gallery \
             --zips-dir deploy/site/zips \
             --wasm-dir deploy/wasm \
             --template deploy/gallery/index.template.html \
