@@ -182,6 +182,16 @@ fn main() -> ! {
 
     println!("Starting Conway's Game of Life");
 
+    // The screenshot dump fires a few frames after boot, but CI monitors
+    // attach late — if the dump starts before the monitor listens, its
+    // FRAMEBUFFER_BEGIN header is lost and the payload is not extracted.
+    // Wait here so the host catches the log from the beginning.
+    #[cfg(feature = "screenshot")]
+    {
+        println!("Screenshot feature: waiting 5s for the serial monitor to attach");
+        delay.delay_millis(5000);
+    }
+
     loop {
         // Wait until vertical blanking before modifying the back buffer.
         dpi.wait_for_vsync();
@@ -191,6 +201,22 @@ fn main() -> ! {
 
         draw_game(back, &grid); // draw_game() clears and redraws the whole framebuffer.
         draw_generation_text(back, generation); // adds text
+
+        // Dump the framebuffer over the esp-println console once, at
+        // generation 10 (not the first frame): CI runners attach the serial
+        // monitor slightly after boot, so an early dump would be missed.
+        // The framebuffer already holds RGB565 little-endian bytes (RGBL).
+        #[cfg(feature = "screenshot")]
+        if generation == 10 {
+            embedded_screenshot::write_framebuffer(
+                &mut embedded_screenshot::ConsolePrinter,
+                H_ACTIVE as usize,
+                V_ACTIVE as usize,
+                embedded_screenshot::RGBL,
+                back,
+            )
+            .ok();
+        }
 
         // Flush the PSRAM cache and switch the DMA to this framebuffer.
         dpi.commit();

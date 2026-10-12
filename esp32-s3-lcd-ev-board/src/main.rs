@@ -531,6 +531,16 @@ fn main() -> ! {
 
     info!("Starting main loop");
 
+    // The screenshot dump fires a few frames after boot, but CI monitors
+    // attach late — if the dump starts before the monitor listens, its
+    // FRAMEBUFFER_BEGIN header is lost and the payload is not extracted.
+    // Wait here so the host catches the log from the beginning.
+    #[cfg(feature = "screenshot")]
+    {
+        info!("Screenshot feature: waiting 5s for the serial monitor to attach");
+        delay.delay_millis(5000);
+    }
+
     const FRAME_BYTES: usize = BUFFER_SIZE * 2;
     let buf_box: Box<[u8; FRAME_BYTES]> = Box::new([0; FRAME_BYTES]);
     // Box::leak turns it into a &'static mut [u8]
@@ -539,6 +549,8 @@ fn main() -> ! {
     // Tie to descriptor set for one-shot DMA
     let mut dma_tx: DmaTxBuf =
         unsafe { DmaTxBuf::new(&mut TX_DESCRIPTORS[..], psram_buf).unwrap() };
+
+    let mut generation: usize = 0;
 
     // Main loop to draw the entire image
     loop {
@@ -552,6 +564,25 @@ fn main() -> ! {
             dst[2 * i] = lo;
             dst[2 * i + 1] = hi;
         }
+
+        // Dump the framebuffer over the esp-println console once, at
+        // generation 10 (not the first frame): CI runners attach the serial
+        // monitor slightly after boot, so an early dump would be missed.
+        // The DMA buffer already holds RGB565 little-endian bytes (RGBL).
+        // A full 480x480 frame is ~600 KB of base64 — expect a slow dump
+        // over a 115200 baud UART console.
+        #[cfg(feature = "screenshot")]
+        if generation == 10 {
+            embedded_screenshot::write_framebuffer(
+                &mut embedded_screenshot::ConsolePrinter,
+                LCD_H_RES as usize,
+                LCD_V_RES as usize,
+                embedded_screenshot::RGBL,
+                dst,
+            )
+            .ok();
+        }
+        generation += 1;
 
         // One-shot transfer
         match dpi.send(false, dma_tx) {

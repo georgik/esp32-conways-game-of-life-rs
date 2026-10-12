@@ -25,9 +25,9 @@ on:
   workflow_dispatch:
     inputs:
       boards:
-        description: 'Comma-separated project dirs to build/flash (must support the screenshot feature)'
+        description: 'Comma-separated project dirs to build/flash (must support the screenshot feature; esp32-p4-function-ev-board also builds with screenshot but is omitted until espbrew detects the riscv32imafc triple)'
         type: string
-        default: 'esp32-s3-box-3, m5stack-atom-s3, m5stack-atom-s3r'
+        default: 'esp32-s3-box-3, m5stack-atom-s3, m5stack-atom-s3r, waveshare-esp32-s3-touch-lcd-1_28, m5stack-core2, esp32-s3-lcd-ev-board'
       snap_duration:
         description: 'Snap capture duration (seconds; ~20s needed per 320x240 frame at 115200 baud)'
         type: string

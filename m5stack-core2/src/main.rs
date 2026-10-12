@@ -313,6 +313,24 @@ fn render_system(
         .display
         .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
         .unwrap();
+
+    // Dump the framebuffer over the esp-println console once, at generation
+    // 10 (not the first frame): CI runners attach the serial monitor slightly
+    // after boot, so an early dump would be missed. A few frames of headroom
+    // keeps the capture reliable; the dump fires only once per boot.
+    #[cfg(feature = "screenshot")]
+    if game.generation == 10 {
+        let pixel_bytes: alloc::vec::Vec<u8> =
+            embedded_screenshot::rgb565_le_bytes(fb_res.frame_buf.data.as_ref()).collect();
+        embedded_screenshot::write_framebuffer(
+            &mut embedded_screenshot::ConsolePrinter,
+            LCD_H_RES,
+            LCD_V_RES,
+            embedded_screenshot::RGBL,
+            &pixel_bytes,
+        )
+        .ok();
+    }
 }
 
 // --- Main Application ---
@@ -416,6 +434,17 @@ fn main() -> ! {
     display.clear(Rgb565::BLUE).unwrap();
 
     info!("Display initialized");
+
+    // The screenshot dump fires a few frames after boot, but CI monitors
+    // attach late — if the dump starts before the monitor listens, its
+    // FRAMEBUFFER_BEGIN header is lost and the payload is not extracted.
+    // Wait here so the host catches the log from the beginning.
+    #[cfg(feature = "screenshot")]
+    {
+        info!("Screenshot feature: waiting 5s for the serial monitor to attach");
+        let mut wait = Delay::new();
+        wait.delay_ms(5000u32);
+    }
 
     // --- Initialize Game Resources ---
     let mut game = GameOfLifeResource::default();
