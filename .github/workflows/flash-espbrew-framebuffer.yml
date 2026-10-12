@@ -103,6 +103,10 @@ jobs:
       - name: Install toolchains for selected boards
         env:
           BOARDS_INPUT: "${{ inputs.boards }}"
+          # espup queries the GitHub API for esp toolchain assets; without a
+          # token the shared runner IP hits the 60 req/h unauthenticated
+          # quota and fails with 403 Forbidden.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
