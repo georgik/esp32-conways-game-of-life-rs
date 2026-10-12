@@ -351,10 +351,12 @@ jobs:
                 --duration "$SNAP_DURATION" )
 
       - name: Upload snapshot zips
+        # Unique name per matrix entry; the deploy job downloads the whole
+        # family via `pattern:` + merge-multiple.
         if: hashFiles('snapshots/*.zip') != ''
         uses: actions/upload-artifact@v7
         with:
-          name: gallery-zips
+          name: gallery-zips-${{ matrix.board }}
           path: snapshots/
           retention-days: 30
 
@@ -396,12 +398,13 @@ jobs:
           path: deploy/wasm
 
       - name: Download snapshot zips
-        # The snap matrix uploads one artifact per board, all named
-        # gallery-zips; merge-multiple combines them into one directory.
+        # The snap matrix uploads one artifact per board named
+        # gallery-zips-<board>; the pattern matches them all and
+        # merge-multiple extracts them into one directory.
         # Fails silently when nothing was snapshotted (all snap jobs failed).
         uses: actions/download-artifact@v7
         with:
-          name: gallery-zips
+          pattern: gallery-zips-*
           path: deploy/site/zips
           merge-multiple: true
         continue-on-error: true
