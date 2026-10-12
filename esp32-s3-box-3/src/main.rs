@@ -27,7 +27,7 @@ use esp_hal::dma_buffers;
 use esp_hal::psram::Psram;
 use esp_hal::{
     Blocking,
-    gpio::{DriveMode, Level, Output, OutputConfig},
+    gpio::{Level, Output, OutputConfig},
     main,
     rng::Rng,
     spi::master::{Spi, SpiDmaBus},
@@ -35,7 +35,7 @@ use esp_hal::{
 };
 use esp_println::{logger::init_logger_from_env, println};
 use log::info;
-use mipidsi::{Builder, models::ILI9488Rgb565};
+use mipidsi::{Builder, models::ILI9342CRgb565};
 use mipidsi::{interface::SpiInterface, options::ColorOrder};
 
 #[panic_handler]
@@ -88,8 +88,8 @@ type MyDisplay = mipidsi::Display<
         ExclusiveDevice<SpiDmaBus<'static, Blocking>, Output<'static>, Delay>,
         Output<'static>,
     >,
-    ILI9488Rgb565,
-    Output<'static>,
+    ILI9342CRgb565,
+    mipidsi::NoResetPin,
 >;
 
 // --- LCD Resolution and FrameBuffer Type Aliases ---
@@ -316,34 +316,21 @@ fn render_system(
         .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
         .unwrap();
 
-    // Dump the framebuffer over serial once, right after the first
-    // rendered frame. A full 320x240 RGB565 frame takes a while at
-    // 115200 baud, so this intentionally fires only once per boot.
+    // Dump the framebuffer over the esp-println console once, right after
+    // the first rendered frame. A full 320x240 RGB565 frame takes a while
+    // at 115200 baud, so this intentionally fires only once per boot.
     #[cfg(feature = "screenshot")]
     if game.generation == 1 {
         let pixel_bytes: alloc::vec::Vec<u8> =
-            esp_screenshot::rgb565_le_bytes(fb_res.frame_buf.data.as_ref()).collect();
-        let mut serial_writer = SerialWriter;
-        esp_screenshot::write_framebuffer(
-            &mut serial_writer,
+            embedded_screenshot::rgb565_le_bytes(fb_res.frame_buf.data.as_ref()).collect();
+        embedded_screenshot::write_framebuffer(
+            &mut embedded_screenshot::ConsolePrinter,
             LCD_H_RES,
             LCD_V_RES,
-            esp_screenshot::RGBL,
+            embedded_screenshot::RGBL,
             &pixel_bytes,
         )
         .ok();
-    }
-}
-
-/// Serial sink for the screenshot dump.
-#[cfg(feature = "screenshot")]
-struct SerialWriter;
-
-#[cfg(feature = "screenshot")]
-impl core::fmt::Write for SerialWriter {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        esp_println::print!("{s}");
-        Ok(())
     }
 }
 
@@ -390,20 +377,28 @@ fn main() -> ! {
     let mut display_delay = Delay::new();
     display_delay.delay_ns(500_000u32);
 
-    // Reset pin: OpenDrain required for ESP32-S3-BOX! Tricky setting.
-    let reset = Output::new(
-        peripherals.GPIO48,
-        Level::High,
-        OutputConfig::default().with_drive_mode(DriveMode::OpenDrain),
-    );
+    // Reset pin: on ESP32-S3-BOX-3 the LCD reset is ACTIVE-HIGH
+    // (esp-bsp: flags.reset_active_high = 1) and shared with the touch
+    // controller. mipidsi assumes an active-low reset, so pulse it manually
+    // here the same way esp_lcd_panel_reset() does and leave the line LOW
+    // (out of reset) afterwards. The old open-drain trick left the line
+    // floating, which made the panel state indeterminate on hot restart
+    // (sometimes inverted colors).
+    let mut reset = Output::new(peripherals.GPIO48, Level::Low, OutputConfig::default());
+    reset.set_level(Level::High);
+    display_delay.delay_ms(10u32);
+    reset.set_level(Level::Low);
+    display_delay.delay_ms(120u32);
+
     // Initialize the display using mipidsi's builder.
-    let mut display: MyDisplay = Builder::new(ILI9488Rgb565, di)
-        .reset_pin(reset)
+    let mut display: MyDisplay = Builder::new(ILI9342CRgb565, di)
         .display_size(320, 240)
-        // .orientation(mipidsi::options::Orientation::new()
-        // .flip_vertical()
-        // .flip_horizontal()
-        // )
+        // Match esp-bsp esp-box-3: MADCTL 0x08 (BGR) + esp_lcd_panel_mirror(true, true)
+        // -> 0xC8 (MX | MY | BGR). Without MX|MY the panel shows the image
+        // rotated by 180 degrees on hardware.
+        .orientation(
+            mipidsi::options::Orientation::new().rotate(mipidsi::options::Rotation::Deg180),
+        )
         .color_order(ColorOrder::Bgr)
         // .invert_colors(ColorInversion::Inverted)
         .init(&mut display_delay)

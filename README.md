@@ -2,7 +2,7 @@
 
 Implementation of Conway's Game of Life Rust Bare Metal.
 
-[![Wokwi](https://img.shields.io/endpoint?url=https%3A%2F%2Fwokwi.com%2Fbadge%2Fclick-to-simulate.json)](https://wokwi.com/experimental/viewer?diagram=https%3A%2F%2Fraw.githubusercontent.com%2Fgeorgik%2esp32-conways-game-of-life-rs%2Fmain%2Fesp32-wrover-kit%2Fdiagram.json&firmware=https://github.com/georgik/esp32-conways-game-of-life-rs/releases/download/v0.5.0/esp32-conways-game-of-life-rs)
+[![Wokwi](https://img.shields.io/endpoint?url=https%3A%2F%2Fwokwi.com%2Fbadge%2Fclick-to-simulate.json)](https://wokwi.com/experimental/viewer?diagram=https%3A%2F%2Fraw.githubusercontent.com%2Fgeorgik%2Fesp32-conways-game-of-life-rs%2Fmain%2Fm5stack-cores3%2Fdiagram.json&firmware=https%3A%2F%2Fgithub.com%2Fgeorgik%2Fesp32-conways-game-of-life-rs%2Freleases-ownload%2Fv0.5.0%2Fm5stack-cores3-conways-game-of-life-rs.img)
 
 ![ESP32 Conways Game of Life in Rust](docs/esp32-conways-game-of-life-rs.png)
 
@@ -218,10 +218,19 @@ cargo run --release
 
 ![ESP32 Conways Game of Life in Rust - ESP32-S3-BOX-3 with Bevy ECS](docs/esp32-s3-box-3-conway.jpg)
 
-- https://github.com/espressif/esp-box
+- [ESP32-S3-BOX-3](https://github.com/espressif/esp-box)
 
-The implementation is based on Rust no_std, using mipidsi crate and Bevy ECS.
-It requires es-rs toolchain for ESP32-S3 version at [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0), because of edition 2024.
+The implementation is based on Rust no_std, using the mipidsi crate, Bevy ECS
+and PSRAM for the framebuffer heap. The 320 × 240 display is driven through
+the `ILI9342CRgb565` model (landscape variant of the ILI9341 controller),
+matching the display initialization of the official
+[esp-bsp](https://github.com/espressif/esp-bsp) `esp-box-3` board support:
+active-high reset pulse on GPIO 48 and MADCTL `0xC8` (180° rotation + BGR
+color order).
+
+It requires the Rust toolchain for ESP32-S3 version at
+[least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0),
+because of edition 2024.
 
 Installation of the toolchain:
 
@@ -231,11 +240,37 @@ espup install --toolchain-version 1.85.0.0
 source ~/export-esp.sh
 ```
 
-Build:
+Build and flash:
 
 ```
 cd esp32-s3-box-3
 cargo run --release
+```
+
+#### Screenshot over the serial console
+
+The optional `screenshot` feature dumps the framebuffer over the serial
+console in the [`esp_lcd_screenshot`](https://components.espressif.com/components/espressif/esp_lcd_screenshot)
+text protocol right after the first rendered frame:
+
+```bash
+cd esp32-s3-box-3
+cargo run -r --features screenshot 2>&1 | tee /tmp/serial.log
+```
+
+Stop the monitor with `Ctrl+C` once the dump has been emitted, then decode
+the log into a PNG/PPM image:
+
+```bash
+embedded-screenshot-decoder /tmp/serial.log --output screenshot
+```
+
+The decoder is provided by the
+[embedded-screenshot-rs](https://github.com/georgik/embedded-screenshot-rs)
+project:
+
+```
+cargo install --git https://github.com/georgik/embedded-screenshot-rs embedded-screenshot-decoder
 ```
 
 ### ESP32-S3-LCD-Ev-Board
