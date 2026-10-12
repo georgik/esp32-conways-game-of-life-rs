@@ -348,11 +348,12 @@ fn render_system(
         .fill_contiguous(&area, fb_res.frame_buf.data.iter().copied())
         .unwrap();
 
-    // Dump the framebuffer over the esp-println console once, right after
-    // the first rendered frame. A full frame takes a while at 115200 baud,
-    // so this intentionally fires only once per boot.
+    // Dump the framebuffer over the esp-println console once, at generation
+    // 10 (not the first frame): CI runners attach the serial monitor slightly
+    // after boot, so an early dump would be missed. A few frames of headroom
+    // keeps the capture reliable; the dump fires only once per boot.
     #[cfg(feature = "screenshot")]
-    if game.generation == 1 {
+    if game.generation == 10 {
         let pixel_bytes: alloc::vec::Vec<u8> =
             embedded_screenshot::rgb565_le_bytes(fb_res.frame_buf.data.as_ref()).collect();
         embedded_screenshot::write_framebuffer(
