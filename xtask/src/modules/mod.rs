@@ -3,6 +3,7 @@ pub mod config;
 pub mod embassy;
 pub mod esphal;
 pub mod fix_cargo;
+pub mod gallery;
 pub mod migrate;
 pub mod pack;
 pub mod project;

@@ -150,6 +150,24 @@ enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
+    /// Assemble the GitHub Pages screenshot gallery from espbrew snap archives
+    Gallery {
+        /// Directory containing per-board <board>.zip snap archives
+        #[arg(long, default_value = "deploy/site/zips")]
+        zips_dir: String,
+        /// Comma-separated boards that get a placeholder card when no archive exists
+        #[arg(long, default_value = "")]
+        expect_boards: String,
+        /// WASM build directory copied into the site (skipped when missing)
+        #[arg(long, default_value = "deploy/wasm")]
+        wasm_dir: String,
+        /// Gallery HTML template with the __BOARDS_CARDS__ placeholder
+        #[arg(long, default_value = "deploy/gallery/index.template.html")]
+        template: String,
+        /// Output site directory
+        #[arg(long, default_value = "deploy/site")]
+        out: String,
+    },
 }
 
 #[tokio::main]
@@ -160,6 +178,28 @@ async fn main() -> Result<()> {
     println!("{}", "=".repeat(60));
 
     match cli.command {
+        Commands::Gallery {
+            zips_dir,
+            expect_boards,
+            wasm_dir,
+            template,
+            out,
+        } => {
+            // Gallery generation doesn't need ESP32 project discovery
+            let expected_boards = expect_boards
+                .split(',')
+                .map(|b| b.trim().to_string())
+                .filter(|b| !b.is_empty())
+                .collect();
+            let config = modules::gallery::GalleryConfig {
+                zips_dir: zips_dir.into(),
+                expected_boards,
+                wasm_dir: wasm_dir.into(),
+                template: template.into(),
+                out: out.into(),
+            };
+            modules::gallery::generate(&config)
+        }
         Commands::BuildWasm { verbose } => {
             // WASM commands don't need ESP32 project discovery
             build_wasm(verbose).await
@@ -237,9 +277,9 @@ async fn run_commands(
         Commands::PinEspHal { dry_run, verbose } => {
             pin_incompatible_esp_hal(&projects, dry_run, verbose).await
         }
-        Commands::BuildWasm { .. } | Commands::ServeWasm { .. } => {
+        Commands::BuildWasm { .. } | Commands::ServeWasm { .. } | Commands::Gallery { .. } => {
             // These should never reach here as they're handled before project discovery
-            anyhow::bail!("WASM commands should be handled before project discovery")
+            anyhow::bail!("commands should be handled before project discovery")
         }
     }
 }

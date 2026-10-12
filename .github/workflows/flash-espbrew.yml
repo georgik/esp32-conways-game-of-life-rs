@@ -74,6 +74,7 @@ jobs:
     runs-on: ubuntu-26.04
     outputs:
       boards: ${{ steps.parse.outputs.json }}
+      boards_csv: ${{ steps.parse.outputs.csv }}
     steps:
       - name: Parse selected boards
         id: parse
@@ -83,11 +84,13 @@ jobs:
           set -euo pipefail
           IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
           json="["
+          csv=""
           first=1
           for b in "${parts[@]}"; do
             b="${b//[[:space:]]/}"
             [ -z "$b" ] && continue
             if [ "$first" -eq 1 ]; then json+="\"$b\""; first=0; else json+=", \"$b\""; fi
+            if [ -z "$csv" ]; then csv="$b"; else csv="$csv,$b"; fi
           done
           json+="]"
           if [ "$first" -eq 1 ]; then
@@ -95,6 +98,7 @@ jobs:
             exit 1
           fi
           echo "json=$json" >> "$GITHUB_OUTPUT"
+          echo "csv=$csv" >> "$GITHUB_OUTPUT"
           echo "selected boards: ${json}"
 
   # ---------------------------------------------------------------------------
@@ -451,7 +455,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy gallery (Pages)
-    needs: [build, wasm, snap]
+    needs: [build, wasm, snap, setup]
     # Run when gallery publishing is requested and snap either succeeded or was
     # intentionally skipped (enable_snap=false).
     if: github.event.inputs.publish_gallery == 'true' && (needs.snap.result == 'success' || needs.snap.result == 'skipped')
@@ -466,6 +470,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Install stable toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build xtask (gallery generator)
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path xtask/Cargo.toml
 
       - name: Download WASM build
         uses: actions/download-artifact@v7
@@ -482,51 +497,20 @@ jobs:
           path: deploy/site/zips
         continue-on-error: true
 
-      - name: Assemble gallery
-        # The template renders ONE hardware-snapshot card whose <h2> names the
-        # board and exposes __SCREENSHOT_HTML__ for the frame only. We inject
-        # just that inner content (an <img> or a placeholder) — never a whole
-        # card — so we do not nest a duplicate card inside the template's card.
+      - name: Assemble gallery (cargo xtask gallery)
+        # The single shared gallery generator (see modules/gallery.rs): expands
+        # the per-board snap archives, copies the WASM build and renders
+        # index.html from the template. Boards without an archive get a
+        # placeholder card, so a partial run still publishes a correct gallery.
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          mkdir -p deploy/site deploy/site/screenshots
-
-          # Copy the WASM browser build into the site (kept live, never flashed).
-          cp -r deploy/wasm/. deploy/site/wasm/
-
-          # Each board's snapshot zip is unpacked into its own subdir so frames
-          # from different boards never mix. -j flattens each zip's frames.
-          for z in deploy/site/zips/*.zip; do
-            b="$(basename "$z" .zip)"
-            mkdir -p "deploy/site/screenshots/$b"
-            unzip -o -j "$z" -d "deploy/site/screenshots/$b"
-          done
-
-          # The board is the one the template's <h2> names. Match its first image
-          # regardless of the frame's filename, so a differently-named capture is
-          # no longer mistaken for "no snapshot".
-          board="esp32-s3-box-3"
-          img="$(find "deploy/site/screenshots/$board" -type f \
-                    \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' \) \
-                    2>/dev/null | head -1 || true)"
-          : > deploy/site/.content.html
-          if [ -n "$img" ]; then
-            rel="screenshots/$board/$(basename "$img")"
-            echo "        <img class=\"screenshot\" src=\"$rel\" alt=\"$board hardware snapshot\">" >> deploy/site/.content.html
-          else
-            echo "        <div class=\"placeholder\">No hardware snapshot captured</div>" >> deploy/site/.content.html
-          fi
-
-          # Inject the frame into the template and write index.html.
-          awk '
-            BEGIN {
-              while ((getline line < "deploy/site/.content.html") > 0) rep = rep line "\n"
-            }
-            { gsub("__SCREENSHOT_HTML__", rep); print }
-          ' deploy/gallery/index.template.html > deploy/site/index.html
-          rm -f deploy/site/.content.html
-          echo "gallery assembled for $board"
+          cargo xtask gallery \
+            --zips-dir deploy/site/zips \
+            --wasm-dir deploy/wasm \
+            --template deploy/gallery/index.template.html \
+            --expect-boards "${{ needs.setup.outputs.boards_csv }}" \
+            --out deploy/site
+          echo "gallery assembled for: ${{ needs.setup.outputs.boards_csv }}"
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

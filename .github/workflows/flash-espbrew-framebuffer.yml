@@ -1,0 +1,422 @@
+name: Flash & Snap via ESPBrew (framebuffer)
+
+# Side-by-side variant of flash-espbrew.yml that validates the framebuffer
+# extraction path end to end:
+#
+#   * `build`  -> ubuntu: compiles every selected board WITH the board's
+#                 `screenshot` feature (embedded-screenshot crate dumps the
+#                 framebuffer over the serial console in the esp_lcd_screenshot
+#                 text protocol) and packages the espbrew artifact per board.
+#   * `snap`   -> [espbrew] self-hosted runner: flashes via `espbrew snap`
+#                 (espbrew >= v0.11.0 extracts the framebuffer dump from the
+#                 serial log into framebuffer-<id>.png without storing the
+#                 bulky base64 lines, and stops monitoring as soon as the
+#                 frame is complete).
+#   * `deploy` -> ubuntu: assembles the GitHub Pages gallery with
+#                 `cargo xtask gallery` (the single shared gallery generator)
+#                 and publishes it. Each board card shows every captured
+#                 frame: camera JPEG and/or framebuffer PNG.
+#
+# Only boards whose firmware implements the `screenshot` feature may be
+# selected. Board selection mirrors flash-espbrew.yml; the default list
+# contains the boards that currently support it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      boards:
+        description: 'Comma-separated project dirs to build/flash (must support the screenshot feature)'
+        type: string
+        default: 'esp32-s3-box-3, m5stack-atom-s3'
+      snap_duration:
+        description: 'Snap capture duration (seconds; ~20s needed per 320x240 frame at 115200 baud)'
+        type: string
+        default: '30'
+      publish_gallery:
+        description: 'Deploy framebuffer gallery + WASM browser build to GitHub Pages'
+        type: boolean
+        default: true
+
+# Self-hosted runners still need read access to the repository contents.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Parse the comma-separated `boards` input into a JSON array once and emit it
+  # as a job output. A matrix expression may only use the `inputs`/`needs`
+  # contexts, so the parse cannot live inside a matrix step.
+  # ---------------------------------------------------------------------------
+  setup:
+    name: Parse board selection
+    runs-on: ubuntu-26.04
+    outputs:
+      boards: ${{ steps.parse.outputs.json }}
+      boards_csv: ${{ steps.parse.outputs.csv }}
+    steps:
+      - name: Parse selected boards
+        id: parse
+        env:
+          BOARDS_INPUT: "${{ inputs.boards }}"
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
+          json="["
+          csv=""
+          first=1
+          for b in "${parts[@]}"; do
+            b="${b//[[:space:]]/}"
+            [ -z "$b" ] && continue
+            if [ "$first" -eq 1 ]; then json+="\"$b\""; first=0; else json+=", \"$b\""; fi
+            if [ -z "$csv" ]; then csv="$b"; else csv="$csv,$b"; fi
+          done
+          json+="]"
+          if [ "$first" -eq 1 ]; then
+            echo "::error::no boards selected (boards input was empty)" >&2
+            exit 1
+          fi
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+          echo "csv=$csv" >> "$GITHUB_OUTPUT"
+          echo "selected boards: ${json}"
+
+  # ---------------------------------------------------------------------------
+  # Build + package the selected boards with the screenshot feature enabled.
+  # Toolchain handling is identical to flash-espbrew.yml: rustup auto-detects
+  # each board's toolchain from its rust-toolchain.toml.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build + package (screenshot)
+    needs: setup
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.setup.outputs.boards) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install toolchains for selected boards
+        env:
+          BOARDS_INPUT: "${{ inputs.boards }}"
+        run: |
+          set -euo pipefail
+
+          IFS=',' read -r -a parts <<< "${BOARDS_INPUT}"
+          BOARDS=()
+          for b in "${parts[@]}"; do
+            b="${b//[[:space:]]/}"
+            [ -n "$b" ] && BOARDS+=("$b")
+          done
+          if [ "${#BOARDS[@]}" -eq 0 ]; then
+            echo "::error::no boards selected (boards input was empty)" >&2
+            exit 1
+          fi
+          echo "Selected boards: ${BOARDS[*]}"
+
+          # Base: stable Rust (riscv boards + the xtask maintenance binary).
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+          # Learn what else each board needs from its rust-toolchain.toml.
+          RISCV_TARGETS=()
+          INSTALL_XTENSA=0
+          for board in "${BOARDS[@]}"; do
+            tc="$board/rust-toolchain.toml"
+            if [ ! -f "$tc" ]; then
+              echo "::warning::'$board' has no rust-toolchain.toml; using stable default"
+              continue
+            fi
+            if grep -qE 'channel[[:space:]]*=[[:space:]]*"stable"' "$tc"; then
+              while IFS= read -r tgt; do
+                [ -n "$tgt" ] && RISCV_TARGETS+=("$tgt")
+              done < <(grep -oE '"[a-z0-9]*riscv[a-z0-9]*-unknown-none-elf"' "$tc" | tr -d '"')
+            elif grep -qE 'channel[[:space:]]*=[[:space:]]*"esp"' "$tc"; then
+              INSTALL_XTENSA=1
+            fi
+          done
+
+          if [ "${#RISCV_TARGETS[@]}" -gt 0 ]; then
+            printf '%s\n' "${RISCV_TARGETS[@]}" | sort -u | while IFS= read -r t; do
+              if rustup target add "$t"; then
+                echo "riscv target ready: $t"
+              else
+                echo "::warning::could not add riscv target '$t' (board may need a custom target)" >&2
+              fi
+            done
+          fi
+
+          if [ "$INSTALL_XTENSA" -eq 1 ]; then
+            echo "Installing xtensa (esp) toolchain..."
+            curl -fsSL -o espup \
+              "https://github.com/esp-rs/espup/releases/download/v0.18.0/espup-x86_64-unknown-linux-gnu"
+            chmod +x espup
+            ./espup install --toolchain-version 1.90.0.0
+          else
+            echo "No esp-channel board selected; skipping xtensa install."
+          fi
+
+          rustup show
+
+      - name: Build xtask maintenance binary
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path xtask/Cargo.toml
+
+      - name: Build + pack ${{ matrix.board }} (screenshot feature)
+        id: buildpack
+        run: |
+          set -euo pipefail
+          board="${{ matrix.board }}"
+          echo ">>> Building $board with the screenshot feature"
+          cd "$board"
+          cargo build --release --features screenshot
+          cd ..
+          echo ">>> Packing espbrew artifact for $board"
+          cargo xtask pack --project "$board" --verbose
+          if [ -d "pack-$board" ]; then
+            echo "pack_exists=true" >> "$GITHUB_OUTPUT"
+            echo "pack dir:"
+            ls -la "pack-$board"
+          else
+            echo "pack_exists=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::pack-$board directory not produced; skipping upload"
+          fi
+
+      - name: Upload pack-${{ matrix.board }}
+        # include-hidden-files is REQUIRED: espbrew autodetect keys on the
+        # dot-directory .cargo/config.toml (see flash-espbrew.yml).
+        if: steps.buildpack.outputs.pack_exists == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pack-${{ matrix.board }}
+          path: pack-${{ matrix.board }}/
+          include-hidden-files: true
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Build the WASM browser build in parallel (stable + wasm32 only).
+  # ---------------------------------------------------------------------------
+  wasm:
+    name: Build WASM browser build
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install stable toolchain + wasm32 target
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      - name: Build WASM library (wasm32)
+        run: |
+          set -euo pipefail
+          cd wasm
+          cargo build --lib --target wasm32-unknown-unknown --release
+
+      - name: Install matching wasm-bindgen-cli
+        id: wb
+        run: |
+          set -euo pipefail
+          wb_version="$(grep -A1 'name = "wasm-bindgen"' wasm/Cargo.lock \
+            | awk '/version =/{gsub(/"/, "", $3); print $3; exit}')"
+          if [ -z "${wb_version}" ]; then
+            echo "::error::could not resolve wasm-bindgen version from wasm/Cargo.lock" >&2
+            exit 1
+          fi
+          echo "version=${wb_version}" >> "$GITHUB_OUTPUT"
+          extract_dir="/tmp/wasm-bindgen-${wb_version}"
+          mkdir -p "${extract_dir}"
+          curl -fsSL -o wb.tar.gz \
+            "https://github.com/rustwasm/wasm-bindgen/releases/download/${wb_version}/wasm-bindgen-${wb_version}-x86_64-unknown-linux-musl.tar.gz"
+          tar xzf wb.tar.gz -C "${extract_dir}"
+          bin="$(find "${extract_dir}" -maxdepth 2 -name wasm-bindgen -type f 2>/dev/null | head -1)"
+          if [ -z "${bin}" ]; then
+            echo "::error::could not locate the wasm-bindgen binary in the tarball" >&2
+            exit 1
+          fi
+          cp "${bin}" "./wasm-bindgen-cli" && chmod +x "./wasm-bindgen-cli"
+          "./wasm-bindgen-cli" --version
+          echo "$(pwd)" >> "$GITHUB_PATH"
+
+      - name: Package with wasm-bindgen
+        run: |
+          set -euo pipefail
+          cd wasm
+          wasm-bindgen-cli --target web --out-dir pkg \
+            target/wasm32-unknown-unknown/release/wasm_conways_game_of_life.wasm
+          if [ ! -f pkg/index.html ]; then
+            echo "::error::pkg/index.html is missing after wasm-bindgen" >&2
+            exit 1
+          fi
+
+      - name: Upload WASM build
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-build
+          path: wasm/pkg/
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Flash + snap on the self-hosted ESPBrew runner. espbrew >= v0.11.0
+  # extracts the framebuffer dump into framebuffer-<id>.png inside the per-board
+  # zip; the zip is expanded by the shared `cargo xtask gallery` generator in
+  # the deploy job.
+  # ---------------------------------------------------------------------------
+  snap:
+    name: Flash & snap (framebuffer)
+    needs: [ build, setup ]
+    runs-on: [espbrew]
+    env:
+      SNAP_DURATION: "${{ github.event.inputs.snap_duration }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.setup.outputs.boards) }}
+    steps:
+      # --- Security: never run on untrusted PR / fork code -------------------
+      - name: Refuse to run on PRs / forks
+        if: github.event.pull_request != null || github.event_name != 'workflow_dispatch'
+        run: |
+          echo "::error::This hardware workflow only runs on manual dispatch."
+          echo "::error::It must never execute on pull requests or fork contributions."
+          exit 1
+
+      - name: Checkout repo
+        uses: actions/checkout@v7
+
+      - name: Download espbrew >= v0.11.0 (arch-aware)
+        run: |
+          set -euo pipefail
+          # Framebuffer extraction needs the v0.11.0 espbrew release or newer
+          # (it ships the esp_lcd_screenshot watcher + PNG extraction).
+          case "$(uname -m)" in
+            x86_64)  ESPBREW_ARCH="linux-amd64" ;;
+            aarch64) ESPBREW_ARCH="linux-arm64" ;;
+            *)       ESPBREW_ARCH="linux-amd64" ;;
+          esac
+          echo "Downloading espbrew-${ESPBREW_ARCH}"
+          curl -fsSL \
+            "https://github.com/georgik/espbrew-go/releases/download/v0.11.0/espbrew-${ESPBREW_ARCH}" \
+            -o espbrew
+          chmod +x ./espbrew
+          ./espbrew --version
+
+      - name: Download firmware pack
+        uses: actions/download-artifact@v7
+        with:
+          name: pack-${{ matrix.board }}
+          path: pack-${{ matrix.board }}/
+
+      - name: Flash + snap ${{ matrix.board }}
+        run: |
+          set -euo pipefail
+          board="${{ matrix.board }}"
+
+          # The espbrew alias is registered in boards.yaml; fall back to the
+          # project dir name when a board is not registered there yet.
+          alias="$(awk -v p="$board" '
+            /^  - alias:/ { a=$3 }
+            /^    project:/ { if ($2 == p) print a }
+          ' boards.yaml)"
+          [ -z "$alias" ] && alias="$board"
+
+          mkdir -p snapshots
+          echo ">>> Flashing + snapping $alias (framebuffer extraction is on by default)"
+          if [ ! -f "pack-$board/Cargo.toml" ]; then
+            echo "::warning::$board pack artifact missing Cargo.toml; skipping flash"
+            exit 0
+          fi
+
+          # Run from inside the pack dir so espbrew auto-detects the Rust
+          # project. The snap zip contains the camera frame (if any) and the
+          # framebuffer PNG extracted from the serial log.
+          ( cd "pack-$board" \
+            && espbrew snap \
+                --filter-alias "$alias" \
+                --save-dir snap-out \
+                --zip "../snapshots/$board.zip" \
+                --duration "$SNAP_DURATION" )
+
+      - name: Upload snapshot zips
+        if: hashFiles('snapshots/*.zip') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: gallery-zips
+          path: snapshots/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Assemble the gallery with the shared `cargo xtask gallery` generator and
+  # publish it to GitHub Pages.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy gallery (Pages)
+    needs: [build, wasm, snap, setup]
+    if: github.event.inputs.publish_gallery == 'true' && (needs.snap.result == 'success' || needs.snap.result == 'skipped')
+    runs-on: ubuntu-26.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install stable toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Build xtask (gallery generator)
+        run: |
+          set -euo pipefail
+          cargo build --release --manifest-path xtask/Cargo.toml
+
+      - name: Download WASM build
+        uses: actions/download-artifact@v7
+        with:
+          name: wasm-build
+          path: deploy/wasm
+
+      - name: Download snapshot zips
+        # Fails silently when nothing was snapshotted (all snap jobs failed).
+        uses: actions/download-artifact@v7
+        with:
+          name: gallery-zips
+          path: deploy/site/zips
+        continue-on-error: true
+
+      - name: Assemble gallery (cargo xtask gallery)
+        # The single shared gallery generator: expands the per-board snap
+        # archives (camera JPEG + framebuffer PNG), copies the WASM build and
+        # renders index.html from the template. Boards without an archive get
+        # a placeholder card.
+        run: |
+          set -euo pipefail
+          cargo xtask gallery \
+            --zips-dir deploy/site/zips \
+            --wasm-dir deploy/wasm \
+            --template deploy/gallery/index.template.html \
+            --expect-boards "${{ needs.setup.outputs.boards_csv }}" \
+            --out deploy/site
+          echo "gallery assembled for: ${{ needs.setup.outputs.boards_csv }}"
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: deploy/site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
