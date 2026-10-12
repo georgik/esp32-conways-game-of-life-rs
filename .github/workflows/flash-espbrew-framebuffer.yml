@@ -396,11 +396,14 @@ jobs:
           path: deploy/wasm
 
       - name: Download snapshot zips
+        # The snap matrix uploads one artifact per board, all named
+        # gallery-zips; merge-multiple combines them into one directory.
         # Fails silently when nothing was snapshotted (all snap jobs failed).
         uses: actions/download-artifact@v7
         with:
           name: gallery-zips
           path: deploy/site/zips
+          merge-multiple: true
         continue-on-error: true
 
       - name: Assemble gallery (cargo xtask gallery)
