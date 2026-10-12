@@ -27,7 +27,7 @@ on:
       boards:
         description: 'Comma-separated project dirs to build/flash (must support the screenshot feature)'
         type: string
-        default: 'esp32-s3-box-3, m5stack-atom-s3'
+        default: 'esp32-s3-box-3, m5stack-atom-s3, m5stack-atom-s3r'
       snap_duration:
         description: 'Snap capture duration (seconds; ~20s needed per 320x240 frame at 115200 baud)'
         type: string
