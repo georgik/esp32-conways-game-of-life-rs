@@ -145,14 +145,19 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<()> {
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i)?;
-        let Some(name) = entry.enclosed_name() else {
-            anyhow::bail!(
-                "zip {} contains an unsafe path: {}",
-                archive.display(),
-                entry.name()
-            );
+
+        // In zip 9.x `name()` returns a Result because the stored entry name
+        // may not be valid UTF-8. A name that can't be decoded can't be safely
+        // used as a path, so decode it up front before extracting.
+        let name = entry
+            .name()
+            .with_context(|| format!("zip {} has a non-UTF-8 entry name", archive.display()))?
+            .into_owned();
+
+        let Some(path) = entry.enclosed_name() else {
+            anyhow::bail!("zip {} contains an unsafe path: {name}", archive.display());
         };
-        let out_path = dest.join(name);
+        let out_path = dest.join(&path);
         if entry.is_dir() {
             fs::create_dir_all(&out_path)?;
             continue;
