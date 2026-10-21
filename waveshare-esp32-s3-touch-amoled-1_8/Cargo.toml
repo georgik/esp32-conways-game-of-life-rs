@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name    = "waveshare-esp32-c6-lcd-1_47-conways-game-of-life-rs"
+name    = "waveshare-esp32-s3-touch-amoled-1_8-conways-game-of-life-rs"
 version = "0.7.0"
 
 
