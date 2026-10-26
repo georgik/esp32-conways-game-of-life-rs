@@ -14,12 +14,11 @@
 # board list lives in exactly one place.
 #
 # NOTE: espbrew auto-detects the Rust project from .cargo/config.toml. Its
-# detector only recognises the target triples it knows about (xtensa-esp32*,
-# riscv32imac/riscv32imc-unknown-none-elf). `esp32-p4-function-ev-board` targets
-# `riscv32imafc-unknown-none-elf`, which espbrew v0.8.1 does not recognise, so
-# it cannot be auto-detected and is intentionally omitted here. Re-add it once
-# espbrew supports the riscv32imafc triple.
+# detector recognises xtensa-esp32*, riscv32imac/riscv32imc and
+# riscv32imafc target triples.
 boards:
+  - alias: esp32-p4-function-ev-board
+    project: esp32-p4-function-ev-board
   - alias: esp32-s3-box-3
     project: esp32-s3-box-3
   - alias: esp32-s3-lcd-ev-board
@@ -30,5 +29,3 @@ boards:
     project: m5stack-atom-s3r
   - alias: m5stack-core2
     project: m5stack-core2
-  - alias: waveshare-esp32-s3-touch-lcd-1.28
-    project: waveshare-esp32-s3-touch-lcd-1_28

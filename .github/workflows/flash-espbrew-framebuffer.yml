@@ -25,9 +25,9 @@ on:
   workflow_dispatch:
     inputs:
       boards:
-        description: 'Comma-separated project dirs to build/flash (must support the screenshot feature; esp32-p4-function-ev-board also builds with screenshot but is omitted until espbrew detects the riscv32imafc triple)'
+        description: 'Comma-separated project dirs to build/flash (must support the screenshot feature)'
         type: string
-        default: 'esp32-s3-box-3, m5stack-atom-s3, m5stack-atom-s3r, waveshare-esp32-s3-touch-lcd-1_28'
+        default: 'esp32-p4-function-ev-board, esp32-s3-box-3, m5stack-atom-s3, m5stack-atom-s3r, m5stack-core2'
       snap_duration:
         description: 'Snap capture duration (seconds; ~20s needed per 320x240 frame at 115200 baud)'
         type: string
@@ -39,7 +39,7 @@ on:
       espbrew_version:
         description: 'espbrew release tag to download (needs framebuffer extraction + skip_capture, i.e. >= v0.11.1)'
         type: string
-        default: 'v0.11.2'
+        default: 'v0.12.0'
 
 # Self-hosted runners still need read access to the repository contents.
 permissions:

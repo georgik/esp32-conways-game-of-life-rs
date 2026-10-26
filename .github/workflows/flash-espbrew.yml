@@ -42,7 +42,7 @@ on:
       boards:
         description: 'Comma-separated project dirs to build/flash (default: all registered boards)'
         type: string
-        default: 'esp32-s3-box-3, esp32-s3-lcd-ev-board, m5stack-atom-s3, m5stack-atom-s3r, m5stack-core2, waveshare-esp32-s3-touch-lcd-1_28'
+        default: 'esp32-s3-box-3, esp32-s3-lcd-ev-board, m5stack-atom-s3, m5stack-atom-s3r, m5stack-core2'
       enable_snap:
         description: 'Flash + capture a hardware snapshot via espbrew snap'
         type: boolean
@@ -387,7 +387,7 @@ jobs:
           esac
           echo "Downloading espbrew-${ESPBREW_ARCH}"
           curl -fsSL \
-            "https://github.com/georgik/espbrew-go/releases/download/v0.8.1/espbrew-${ESPBREW_ARCH}" \
+            "https://github.com/georgik/espbrew-go/releases/download/v0.12.0/espbrew-${ESPBREW_ARCH}" \
             -o espbrew
           chmod +x ./espbrew
           ./espbrew --version

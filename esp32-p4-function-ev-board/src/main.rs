@@ -10,9 +10,9 @@
 
 #![no_std]
 #![no_main]
- 
+
 const H_ACTIVE: u32 = 1024; //height of the screen
-const V_ACTIVE: u32 = 600;  //width of the screen
+const V_ACTIVE: u32 = 600; //width of the screen
 
 const BYTES_PER_PIXEL: usize = 2;
 const FB_SIZE: usize = H_ACTIVE as usize * V_ACTIVE as usize * BYTES_PER_PIXEL;
@@ -519,16 +519,9 @@ fn draw_generation_text(framebuffer: &mut [u8], generation: usize) {
         0x0000,
     );
 
-    let mut target = MipiFrameBuffer::new(
-        framebuffer,
-        H_ACTIVE as usize,
-        V_ACTIVE as usize,
-    );
+    let mut target = MipiFrameBuffer::new(framebuffer, H_ACTIVE as usize, V_ACTIVE as usize);
 
-    let style = MonoTextStyle::new(
-        &FONT_10X20,
-        Rgb565::WHITE,
-    );
+    let style = MonoTextStyle::new(&FONT_10X20, Rgb565::WHITE);
 
     Text::with_baseline(
         text.as_str(),
