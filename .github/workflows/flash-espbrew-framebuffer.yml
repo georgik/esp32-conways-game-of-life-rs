@@ -188,9 +188,9 @@ jobs:
           if [ "$INSTALL_XTENSA" -eq 1 ]; then
             echo "Installing xtensa (esp) toolchain..."
             curl -fsSL -o espup \
-              "https://github.com/esp-rs/espup/releases/download/v0.18.0/espup-x86_64-unknown-linux-gnu"
+              "https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu"
             chmod +x espup
-            ./espup install --toolchain-version 1.90.0.0
+            ./ESPUP install --toolchain-version 1.97.0.0
           else
             echo "No esp-channel board selected; skipping xtensa install."
           fi
