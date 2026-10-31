@@ -44,7 +44,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 // -----------------------------------------------------------------------------
 
 const LCD_WIDTH: usize = 800;
-const LCD_HEIGHT: usize = 480;
+const LCD_HEIGHT: usize = 480; // 480
 const FRAME_BYTES: usize = LCD_WIDTH * LCD_HEIGHT * 2;
 
 const HSYNC_WIDTH: usize = 4;
@@ -72,7 +72,7 @@ static mut TX_DESCRIPTORS:
 
 // At approximately 61 Hz, three frames is about 49 ms.
 // Rendering adds some time between transfers.
-const FRAMES_PER_GENERATION: usize = 3;
+const FRAMES_PER_GENERATION: usize = 5;
 
 // -----------------------------------------------------------------------------
 // Allocate a 64-byte-aligned framebuffer from the PSRAM heap.
@@ -184,7 +184,7 @@ fn age_to_color(age: u8) -> u16 {
 }
 
 fn render_grid_pixels(pixels: &mut [u8], grid: &[u8]) {
-    assert!(CELL_SIZE >= 2);
+    assert!(CELL_SIZE >= 2);//2
     assert_eq!(grid.len(), GRID_CELLS);
     assert_eq!(GRID_WIDTH * CELL_SIZE, LCD_WIDTH);
     assert_eq!(GRID_HEIGHT * CELL_SIZE, LCD_HEIGHT);
@@ -257,6 +257,56 @@ fn render_grid_pixels(pixels: &mut [u8], grid: &[u8]) {
     }
 }
 
+fn render_test_bands(pixels: &mut [u8]) {
+    assert_eq!(pixels.len(), FRAME_BYTES);
+
+    let colors = [
+        rgb565(0, 63, 0),  // Second quarter: green
+        rgb565(31, 0, 0),  // Top quarter: red
+        rgb565(0, 0, 31),  // Third quarter: blue
+        rgb565(31, 63, 0), // Bottom quarter: yellow
+        rgb565(31, 63, 31),  // Third quarter: white
+        rgb565(31, 31, 31), // Bottom quarter: yellow
+    ];
+
+    for (y, row) in pixels
+        .chunks_exact_mut(LCD_WIDTH * 2)
+        .enumerate()
+    {
+        let color = colors[y * 6 / LCD_HEIGHT].to_le_bytes();
+
+        for pixel in row.chunks_exact_mut(2) {
+            pixel.copy_from_slice(&color);
+        }
+    }
+}
+
+fn render_test_bands2(pixels: &mut [u8]) {
+    assert_eq!(pixels.len(), FRAME_BYTES);
+
+    let colors = [
+        rgb565(31, 63, 31),  // Third quarter: white
+        rgb565(31, 31, 31), // Bottom quarter: yellow
+        rgb565(31, 63, 0), // Bottom quarter: yellow
+        rgb565(0, 0, 31),  // Third quarter: blue
+        rgb565(0, 63, 0),  // Second quarter: green
+        rgb565(31, 0, 0),  // Top quarter: red
+    ];
+
+    for (y, row) in pixels
+        .chunks_exact_mut(LCD_WIDTH * 2)
+        .enumerate()
+    {
+        let color = colors[y * 6 / LCD_HEIGHT].to_le_bytes();
+
+        for pixel in row.chunks_exact_mut(2) {
+            pixel.copy_from_slice(&color);
+        }
+    }
+}
+
+
+
 // -----------------------------------------------------------------------------
 // Application
 // -----------------------------------------------------------------------------
@@ -286,7 +336,7 @@ fn main() -> ! {
     );
 
     // Allow the display hardware to settle.
-    delay.delay_millis(100);
+    delay.delay_millis(200);
 
     // Allocate one framebuffer in PSRAM.
     let pixels = allocate_framebuffer();
@@ -324,8 +374,20 @@ fn main() -> ! {
     let mut rng = Rng::new();
     randomize_grid(&mut rng, &mut current);
 
-    // Draw the initial generation before the first DMA transfer.
-    render_grid_pixels(dma_tx.as_mut_slice(), &current);
+    // Software framebuffer: only the CPU renders into this allocation.
+    // It is separate from the aligned framebuffer owned by dma_tx.
+    let mut render_buffer = vec![0u8; FRAME_BYTES].into_boxed_slice();
+
+    // Render a complete image first.
+    render_grid_pixels(&mut render_buffer, &current);
+
+    // Then copy the finished image into the DMA framebuffer.
+    // The data is already in little-endian RGB565 format.
+    dma_tx
+        .as_mut_slice()
+        .copy_from_slice(&render_buffer);
+
+    println!("3b: Separate rendering and DMA framebuffers initialized");
 
     // -------------------------------------------------------------------------
     // Configure the display. GPIOs and timing remain unchanged.
@@ -408,11 +470,13 @@ fn main() -> ! {
     let mut display_enabled = false;
     let mut frames_since_generation = 0usize;
 
-    println!("Starting single-buffer frame loop");
+    println!("Starting staged-rendering frame loop");
 
     loop {
-        // Transfer exactly one frame. The buffer is moved into the transfer
-        // and returned to us when wait() finishes.
+        // The DMA framebuffer already contains a complete image.
+        //
+        // Ownership moves into the transfer, so neither framebuffer
+        // copying nor direct DMA-buffer modification happens here.
         let transfer = match dpi.send(false, dma_tx) {
             Ok(transfer) => {
                 if !display_enabled {
@@ -424,16 +488,17 @@ fn main() -> ! {
             }
 
             Err((error, returned_dpi, returned_dma_tx)) => {
-                println!("LCD DMA send error: {:?}", error);
-
                 dpi = returned_dpi;
                 dma_tx = returned_dma_tx;
 
-                delay.delay_millis(10);
+                println!("LCD DMA send error: {:?}", error);
+                delay.delay_millis(50);
                 continue;
             }
         };
 
+        // Recover the peripheral and DMA framebuffer after the
+        // one-shot transfer finishes.
         let (result, returned_dpi, returned_dma_tx) =
             transfer.wait();
 
@@ -442,26 +507,39 @@ fn main() -> ! {
 
         if let Err(error) = result {
             println!("LCD DMA transfer error: {:?}", error);
+            delay.delay_millis(50);
             continue;
         }
 
         frames_since_generation += 1;
 
         if frames_since_generation >= FRAMES_PER_GENERATION {
-            // DMA has finished with this frame, so it is safe to modify
-            // the single framebuffer before starting another transfer.
+            // 1. Advance the simulation.
             update_game_of_life(&current, &mut next);
             core::mem::swap(&mut current, &mut next);
 
+            // 2. Render into the SOFTWARE framebuffer.
+            //
+            // All cell drawing and scanline copy_within operations
+            // now happen outside the DMA framebuffer.
             render_grid_pixels(
-                dma_tx.as_mut_slice(),
+                &mut render_buffer,
                 &current,
             );
+
+            // 3. Copy the completed image into the DMA framebuffer.
+            //
+            // The previous transfer has finished. The next transfer
+            // will not start until this entire copy is complete.
+            dma_tx
+                .as_mut_slice()
+                .copy_from_slice(&render_buffer);
 
             frames_since_generation = 0;
         }
 
-        // The next iteration sends the buffer again. DmaTxBuf prepares
-        // the normal descriptor chain and writes back the pixel cache.
+        // The next iteration transmits the completed DMA framebuffer.
+        // On iterations without a generation update, it retransmits
+        // the existing image without rewriting it.
     }
 }
