@@ -1,5 +1,5 @@
 [package]
-name = "esp32-s3-lcd-ev-board-conways-game-of-life" ##################### NEEEEEEEEEEEDS TO BE MODIFIED
+name = "esp32-s31-korovo1-conways-game-of-life"
 version = "0.7.0"
 authors = ["Juraj Michálek <juraj.michalek@espressif.com>", "Matěj David Ondráček <mathejdo@seznam.cz>"]
 edition = "2024"
@@ -27,11 +27,7 @@ mipidsi = "0.10.0"
 embedded-graphics-framebuf = "0.5.0"
 heapless = "0.9.2"
 embedded-hal-bus = "0.3.0"
-bevy_ecs = { version = "0.18.1", default-features = false }
 
 
 [features]
-default = [ "esp-hal/esp32s31", "esp-backtrace/esp32s31", "esp-println/esp32s31", "esp32-s3-box-3" ]
-
-# esp32-s3-box-3 = [ "esp-bsp/esp32-s3-box-3", ]
-esp32-s3-box-3 = [ ]
+default = [ "esp-hal/esp32s31", "esp-backtrace/esp32s31", "esp-println/esp32s31" ]

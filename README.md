@@ -66,6 +66,24 @@ Build and flash:
 cd esp32-p4-function-ev-board
 cargo run --release
 ```
+### ESP32-S31-Korvo-1
+
+![ESP32-S31-Korvo-1 Board running Conway's Game of Life](docs/esp32-s31-korovo-1-v1.1.webp)
+
+Bare-metal Rust `no_std` implementation for the
+ESP32-S31-Korvo-1 V1.1 with ESP32-S3-LCD-EV-Board-SUB3 with 800x480 LCD
+display.
+
+This version uses direct game logic without Bevy ECS or Embassy.
+
+Build and flash:
+
+```bash
+cd esp32-s31-korovo-1
+cargo run --release
+```
+
+
 
 
 ### Waveshare ESP32-C6-LCD 1.47
