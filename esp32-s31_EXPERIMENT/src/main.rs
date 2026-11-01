@@ -5,6 +5,17 @@ extern crate alloc;
 
 use alloc::{boxed::Box, vec};
 
+use core::convert::Infallible;
+
+use embedded_graphics::{
+    mono_font::{ascii::FONT_10X20, MonoTextStyleBuilder},
+    pixelcolor::Rgb565,
+    prelude::*,
+    text::{Alignment, Baseline, Text, TextStyleBuilder},
+};
+
+
+
 use esp_hal::{
     clock::CpuClock,
     delay::Delay,
@@ -230,6 +241,88 @@ fn render_grid_pixels(pixels: &mut [u8], grid: &[u8]) {
 }
 
 // -----------------------------------------------------------------------------
+// Text overlay
+// -----------------------------------------------------------------------------
+
+struct FramebufferCanvas<'a> {
+    pixels: &'a mut [u8],
+}
+
+impl OriginDimensions for FramebufferCanvas<'_> {
+    fn size(&self) -> Size {
+        Size::new(LCD_WIDTH as u32, LCD_HEIGHT as u32)
+    }
+}
+
+impl DrawTarget for FramebufferCanvas<'_> {
+    type Color = Rgb565;
+    type Error = Infallible;
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for Pixel(point, color) in pixels {
+            // Clip pixels outside the framebuffer.
+            if point.x < 0
+                || point.y < 0
+                || point.x >= LCD_WIDTH as i32
+                || point.y >= LCD_HEIGHT as i32
+            {
+                continue;
+            }
+
+            let offset =
+                (point.y as usize * LCD_WIDTH + point.x as usize) * 2;
+
+            let bytes = color.into_storage().to_le_bytes();
+
+            self.pixels[offset..offset + 2].copy_from_slice(&bytes);
+        }
+
+        Ok(())
+    }
+}
+
+fn draw_generation_label(pixels: &mut [u8], generation: usize) {
+    assert_eq!(pixels.len(), FRAME_BYTES);
+
+    let mut canvas = FramebufferCanvas { pixels };
+
+    // Three digits keep the label width constant for generations 0..400.
+    let label = alloc::format!("Generation: {:03}", generation);
+
+    let character_style = MonoTextStyleBuilder::new()
+        .font(&FONT_10X20)
+        .text_color(Rgb565::WHITE)
+        .background_color(Rgb565::BLACK)
+        .build();
+
+    let text_style = TextStyleBuilder::new()
+        .alignment(Alignment::Right)
+        .baseline(Baseline::Bottom)
+        .build();
+
+    const MARGIN: i32 = 6;
+
+    let position = Point::new(
+        LCD_WIDTH as i32 - 1 - MARGIN,
+        LCD_HEIGHT as i32 - 1 - MARGIN,
+    );
+
+    Text::with_text_style(
+        &label,
+        position,
+        character_style,
+        text_style,
+    )
+    .draw(&mut canvas)
+    .unwrap();
+}
+
+
+
+// -----------------------------------------------------------------------------
 // Application
 // -----------------------------------------------------------------------------
 
@@ -277,6 +370,7 @@ fn main() -> ! {
 
     // Render a complete image first.
     render_grid_pixels(&mut render_buffer, &current);
+    draw_generation_label(&mut render_buffer, generation);
 
     // Then copy the finished image into the DMA framebuffer.
     // The data is already in little-endian RGB565 format.
@@ -400,6 +494,7 @@ fn main() -> ! {
             }
 
             render_grid_pixels(&mut render_buffer, &current);
+            draw_generation_label(&mut render_buffer, generation);
 
             // Publish the completed image to the DMA framebuffer.
             dma_tx.as_mut_slice().copy_from_slice(&render_buffer);
