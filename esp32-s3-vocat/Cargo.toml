@@ -1,0 +1,38 @@
+[package]
+name = "esp32-s3-vocat-conways-game-of-life"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+# Empty workspace to avoid being part of the parent workspace
+[workspace]
+
+[dependencies]
+esp-hal = { version = "~1.2.2", features = ["esp32s3", "log-04", "unstable"] }
+esp-rtos = { version = "0.4.0", features = ["embassy", "esp-alloc", "esp32s3", "log-04"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3", "log-04"] }
+esp-alloc = { version = "0.11.0", features = ["esp32s3"] }
+esp-backtrace = { version = "0.20.0", features = ["esp32s3", "panic-handler", "println"] }
+# The console is the USB-Serial-JTAG on the USB-C port: UART0 TX (GPIO43)
+# drives the green LED on the ESP-VoCat, so never print to UART.
+esp-println = { version = "0.18.0", default-features = false, features = [
+    "colors",
+    "critical-section",
+    "esp32s3",
+    "jtag-serial",
+    "log-04",
+] }
+log = "0.4.27"
+
+embassy-executor = { version = "0.10.0", features = ["log"] }
+embassy-time = { version = "0.5.1", features = ["log"] }
+
+embedded-graphics = "0.8"
+bevy_ecs = { version = "0.18.1", default-features = false }
+heapless = "0.9.2"
+
+# Board support: the round 360×360 ST77916 LCD on the ESP-VoCat v1.2.
+esp-vocat = { git = "https://github.com/Hahihula/esp-vocat-rust-examples", tag = "v0.1.0" }
+
+[features]
+default = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-println/esp32s3"]

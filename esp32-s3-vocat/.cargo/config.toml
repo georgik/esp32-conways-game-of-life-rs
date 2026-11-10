@@ -1,0 +1,14 @@
+include = ["esp-config.toml"]
+
+[target.xtensa-esp32s3-none-elf]
+# ESP32-S3, DIO at 80 MHz. Not QIO: espflash writes the mode into the
+# bootloader header too, and the S3 ROM then fails to load the bootloader.
+# ESP-IDF keeps the bootloader at DIO and switches later.
+runner = "espflash flash --monitor --chip esp32s3 --partition-table partitions.csv --flash-mode dio --flash-freq 80mhz"
+
+[build]
+rustflags = ["-C", "link-arg=-nostartfiles"]
+target = "xtensa-esp32s3-none-elf"
+
+[unstable]
+build-std = ["alloc", "core"]

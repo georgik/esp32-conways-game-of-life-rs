@@ -23,6 +23,8 @@ boards:
     project: esp32-s3-box-3
   - alias: esp32-s3-lcd-ev-board
     project: esp32-s3-lcd-ev-board
+  - alias: esp32-s3-vocat
+    project: esp32-s3-vocat
   - alias: m5stack-atom-s3
     project: m5stack-atom-s3
   - alias: m5stack-atom-s3r
