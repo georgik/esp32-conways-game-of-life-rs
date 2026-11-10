@@ -295,8 +295,7 @@ cargo install --git https://github.com/georgik/embedded-screenshot-rs embedded-s
 
 ![ESP32 Conways Game of Life in Rust - ESP-VoCat with Bevy ECS](docs/esp32-s3-vocat-conway.webp)
 
-[ESP-VoCat](https://github.com/espressif/esp-vocat) (the "Cactus Whistle"
-development board, based on ESP32-S3) carries a round 1.85″ 360 × 360 LCD with
+[ESP-VoCat](https://github.com/espressif/esp-vocat) carries a round 1.85″ 360 × 360 LCD with
 an `ST77916` controller connected over QSPI. The display is driven through the
 [`esp-vocat`](https://github.com/Hahihula/esp-vocat-rust-examples) board
 support crate: the simulation runs on a Bevy ECS schedule and renders into the
@@ -308,6 +307,8 @@ The implementation is based on Rust `no_std` and Bevy ECS, using esp-rtos for
 the Embassy async timer. The ESP-VoCat has no buttons wired to the game, so the
 pattern runs continuously; the generation counter is drawn in the top-left
 corner.
+
+More interesting examples are available at: https://github.com/Hahihula/esp-vocat-rust-examples
 
 It requires the Rust toolchain for ESP32-S3 version at
 [least 1.85](https://github.com/esp-rs/rust-build/releases/tag/v1.85.0.0),
@@ -332,7 +333,7 @@ cargo run --release
 
 The configuration is for board revision v1.5.
 
-![ESP32 Conways Game of Life in Rust - ESP32-S3-LCD-Ev-Board with Bevy ECS](docs/esp32s3-lcd-ev-board-conway.jpg)
+![ESP32 Conways Game of Life in Rust - ESP32-S3-LCD-Ev-Board with Bevy ECS](docs/esp32-s3-lcd-ev-board-conway.jpg)
 
 [ESP32-S3-LCD-Ev-Board](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32s3-lcd-ev-board/index.html)
 is more complex when it comes to the display. Initialization sequence for the display is:
