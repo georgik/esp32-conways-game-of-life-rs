@@ -15,6 +15,7 @@ use modules::{
     psram_feature::remove_psram_feature,
     toml_fix::fix_cargo_toml_quotes,
     update::update_dependencies,
+    verify::verify_formal_properties,
     wasm::{build_wasm, serve_wasm},
 };
 
@@ -150,6 +151,12 @@ enum Commands {
         #[arg(long)]
         port: Option<u16>,
     },
+    /// Formally verify the pure Game of Life core with Kani
+    /// (sanity test + `cargo kani --features kani`).
+    Verify {
+        #[arg(long)]
+        kani_only: bool,
+    },
     /// Assemble the GitHub Pages screenshot gallery from espbrew snap archives
     Gallery {
         /// Directory containing per-board <board>.zip snap archives
@@ -208,6 +215,7 @@ async fn main() -> Result<()> {
             // WASM commands don't need ESP32 project discovery
             serve_wasm(verbose, port).await
         }
+        Commands::Verify { kani_only } => verify_formal_properties(kani_only).await,
         _ => {
             // Other commands need ESP32 project discovery
             let projects = discover_projects().await?;
@@ -277,7 +285,8 @@ async fn run_commands(
         Commands::PinEspHal { dry_run, verbose } => {
             pin_incompatible_esp_hal(&projects, dry_run, verbose).await
         }
-        Commands::BuildWasm { .. } | Commands::ServeWasm { .. } | Commands::Gallery { .. } => {
+        Commands::BuildWasm { .. } | Commands::ServeWasm { .. } | Commands::Gallery { .. } |
+        Commands::Verify { .. } => {
             // These should never reach here as they're handled before project discovery
             anyhow::bail!("commands should be handled before project discovery")
         }

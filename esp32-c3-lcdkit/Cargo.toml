@@ -9,6 +9,10 @@ license = "MIT OR Apache-2.0"
 [workspace]
 
 [dependencies]
+# Pure, Kani-verified Game of Life core. The firmware depends on this crate so
+# the code that ships is exactly the code that is formally verified.
+game_of_life = { path = "../game_of_life" }
+
 esp-hal = { version = "=1.1.2", features = ["esp32c3", "unstable"] }
 esp-backtrace = { version = "0.19.0", features = [
     "panic-handler",

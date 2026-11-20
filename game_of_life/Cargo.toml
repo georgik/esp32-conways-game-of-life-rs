@@ -1,0 +1,18 @@
+[package]
+name = "game_of_life"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Pure, host-verifiable Conway Game of Life core, shared by the esp32-c3 firmware and checked with Kani."
+
+# Standalone workspace so this crate can be built for the host (Kani / cargo
+# test) independently of the firmware's riscv-only workspace.
+[workspace]
+
+# The pure logic uses only core (no heap, no std), so this crate compiles both
+# for the host (Kani) and for the firmware's `riscv32imc-unknown-none-elf`
+# `no_std` target. Kani harnesses are compiled only with `--features kani`.
+[features]
+kani = []
+
+[dependencies]

@@ -10,4 +10,5 @@ pub mod project;
 pub mod psram_feature;
 pub mod toml_fix;
 pub mod update;
+pub mod verify;
 pub mod wasm;
