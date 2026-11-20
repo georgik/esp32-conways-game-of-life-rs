@@ -1,0 +1,89 @@
+name: Formal Verify - Kani
+
+# Formal (bounded-model-check) verification of the PURE Game of Life core.
+#
+# The esp32 boards are built/flashed by ci-unified.yml. This workflow is a
+# separate concern: it proves, on the host, that the pure transition logic in
+# the `game_of_life` crate can never violate its safety laws. That crate is a
+# REAL dependency of the esp32-c3 firmware, so proving it here *is* proving the
+# shipped logic (see the "Formal Verification (Kani)" section of README.md).
+#
+# It uses Kani (CBMC + a SAT solver). Kani symbolically executes every path up
+# to an unwind bound and mathematically proves the proof-harness asserts hold.
+# When a law is violated Kani prints the exact failing check + source location
+# and the step exits non-zero -- the AI-hallucination guard that fails CI.
+#
+# Kept as its own workflow (not folded into ci-unified.yml) because its setup
+# (pinned nightly toolchain + CBMC) is slow and unrelated to board builds.
+
+on:
+  push:
+    branches: [ main ]
+    # Only care about changes that can affect the verified logic or the
+    # runner itself: the crate, the xtask that launches it, or this file.
+    paths:
+      - "game_of_life/**"
+      - "xtask/**"
+      - ".github/workflows/formal-verify.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "game_of_life/**"
+      - "xtask/**"
+      - ".github/workflows/formal-verify.yml"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  formal-verify:
+    name: Kani formal verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        # The xtask and the `game_of_life` crate are plain host crates built
+        # with stable. rust-src is pulled in defensively (Kani's own nightly
+        # needs it too, but this costs nothing and avoids surprises).
+        #
+        # Installed via rustup directly (not a toolchain action) to match
+        # ci-unified.yml, which dropped the unmaintained actions-rs/toolchain.
+        # The ubuntu runner already ships rustup.
+        run: |
+          set -euo pipefail
+          rustup toolchain install stable --profile minimal --component rust-src
+          rustup default stable
+          rustup component add rust-src --toolchain stable
+          rustup show
+
+      - name: Install Kani
+        # `cargo install --locked kani-verifier` then `cargo kani setup`
+        # downloads the pinned nightly toolchain and CBMC. This is the same
+        # method used locally (see wiki/handover.md).
+        run: |
+          set -euo pipefail
+          cargo install --locked kani-verifier
+          cargo kani setup
+          cargo kani --version
+
+      - name: Formal verification (cargo xtask verify)
+        # Runs `cargo test` (sanity) then `cargo kani --features kani` on the
+        # game_of_life crate. Exits non-zero if any law is violated.
+        run: |
+          set -euo pipefail
+          cargo xtask verify
+
+      - name: Upload verification logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: kani-logs
+          path: "**/kani_out/**"
+          retention-days: 7
+          # Best-effort: Kani only writes kani_out/ when configured, so a
+          # missing glob must not fail the job.
+          if-no-files-found: warn

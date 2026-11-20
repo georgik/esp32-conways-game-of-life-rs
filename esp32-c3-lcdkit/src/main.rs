@@ -123,6 +123,11 @@ const GRID_WIDTH: usize = 35;
 const GRID_HEIGHT: usize = 35;
 const RESET_AFTER_GENERATIONS: usize = 500;
 
+// The pure transition logic lives in the `game_of_life` crate, where it is
+// formally verified with Kani. Calling it from here (rather than copying it)
+// means the code that ships on the chip is exactly the code that was proven.
+use game_of_life::update_game_of_life;
+
 fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     for row in grid.iter_mut() {
         for cell in row.iter_mut() {
@@ -134,43 +139,7 @@ fn randomize_grid(rng: &mut Rng, grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
     }
 }
 
-fn update_game_of_life(grid: &mut [[u8; GRID_WIDTH]; GRID_HEIGHT]) {
-    let mut new_grid = [[0u8; GRID_WIDTH]; GRID_HEIGHT];
-    for y in 0..GRID_HEIGHT {
-        for x in 0..GRID_WIDTH {
-            // Count neighbors: consider a cell alive if its age is >0.
-            let mut alive_neighbors = 0;
-            for i in 0..3 {
-                for j in 0..3 {
-                    if i == 1 && j == 1 {
-                        continue;
-                    }
-                    let nx = (x + i + GRID_WIDTH - 1) % GRID_WIDTH;
-                    let ny = (y + j + GRID_HEIGHT - 1) % GRID_HEIGHT;
-                    if grid[ny][nx] > 0 {
-                        alive_neighbors += 1;
-                    }
-                }
-            }
-            if grid[y][x] > 0 {
-                // Live cell survives if 2 or 3 neighbors; increment age.
-                if alive_neighbors == 2 || alive_neighbors == 3 {
-                    new_grid[y][x] = grid[y][x].saturating_add(1);
-                } else {
-                    new_grid[y][x] = 0;
-                }
-            } else {
-                // Dead cell becomes alive if exactly 3 neighbors.
-                if alive_neighbors == 3 {
-                    new_grid[y][x] = 1;
-                } else {
-                    new_grid[y][x] = 0;
-                }
-            }
-        }
-    }
-    *grid = new_grid;
-}
+
 
 /// Maps cell age (1..=max_age) to a color. Newborn cells are dark blue and older cells become brighter (toward white).
 fn age_to_color(age: u8) -> Rgb565 {
