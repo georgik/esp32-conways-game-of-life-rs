@@ -569,8 +569,8 @@ cargo xtask verify --kani-only
 
 The `verify` command formally checks the pure Game of Life core in the
 `game_of_life` crate — the *exact* code the `esp32-c3-lcdkit` firmware depends
-on — with [Kani](https://getkani.com) (bounded model checking). It proves three
-classes of property:
+on — with [Kani](https://github.com/model-checking/kani) (bounded model
+checking). It proves three classes of property:
 
 - **Memory safety** — the toroidal neighbour index is always in bounds, so the
   update can never panic on an out-of-bounds read.
@@ -582,6 +582,15 @@ Because the verified crate is a real dependency of the firmware (not a copy),
 proving it here *is* proving the shipped logic. When a property is violated,
 Kani prints the exact failing check and source location and the command exits
 non-zero.
+
+**Getting Kani.** Kani installs as a cargo subcommand. `setup` downloads a
+pinned nightly toolchain and CBMC:
+
+```bash
+cargo install --locked kani-verifier
+cargo kani setup
+cargo kani --version     # -> Kani Rust Verifier + CBMC
+```
 
 #### Run All Tasks
 ```bash
